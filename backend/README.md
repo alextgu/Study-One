@@ -1,15 +1,23 @@
 ## Getting Started
 
-Install dependencies
+Install dependencies:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-Run the server
+Create a virtual environment (Optional):
 
 ```bash
-uvicorn main:app
+python -m venv venv
+source venv/bin/activate   # macOS/Linux
+venv\Scripts\activate      # Windows
+```
+
+Run the server:
+
+```bash
+uvicorn main:app --reload
 ```
 
 Open browser and go to [http://localhost:8000](http://localhost:8000)

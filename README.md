@@ -92,7 +92,7 @@ Both services run locally and communicate over HTTP.
 Clone the repository:
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/utmgdsc/Study-One.git
 cd Study-One
 ```
 

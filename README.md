@@ -13,7 +13,14 @@ Follow the steps below to run the project locally.
 
 ## .env Format
 
+# Backend
+DATABASE_URL=
+JWT_SECRET=
+ENV=development
 GEMINI_API_KEY="YOUR_GEMINI_API_KEY"
+
+# Frontend
+NEXT_PUBLIC_API_URL=
 
 ---
 
@@ -32,7 +39,6 @@ GEMINI_API_KEY="YOUR_GEMINI_API_KEY"
 cd frontend
 npm install
 npm run dev
-http://localhost:3000/
 ```
 
 ---
@@ -45,5 +51,4 @@ python -m venv venv
 # Windows: venv\Scripts\activate
 # Mac: source venv/bin/activate
 pip install -r requirements.txt
-pip freeze > requirements.txt # Puts all dependencies in requirements.txt
 ```

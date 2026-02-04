@@ -65,6 +65,7 @@ class GenerateResponse(BaseModel):
 def root():
     return {}
 
+
 @app.get("/health")
 def check_health():
     return {"status": "ok"}

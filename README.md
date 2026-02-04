@@ -1,4 +1,4 @@
-# Study-One
+# Socrato
 
 Socrato is a full-stack AI study assistant that turns raw notes into concise summaries and practice questions. Socrato's goal is to help students study faster and more effectively before quizzes or exams. It has a Next.js frontend and FastAPI backend. 
 
@@ -14,6 +14,21 @@ Study-One/
 ```
 
 Both services run locally and communicate over HTTP.
+
+---
+
+## .env Format
+
+```env
+# Backend
+DATABASE_URL=
+JWT_SECRET=
+ENV=development
+GEMINI_API_KEY="YOUR_GEMINI_API_KEY"
+
+# Frontend
+NEXT_PUBLIC_API_URL=
+```
 
 ---
 

@@ -11,6 +11,7 @@ Socrato is a full-stack AI study assistant that turns raw notes into concise sum
 Study-One/
 ├── frontend/   → Next.js web app
 ├── backend/    → FastAPI server
+├── shared/     → Shared type definitions (API contract)
 ```
 
 Both services run locally and communicate over HTTP.
@@ -112,6 +113,45 @@ cd Study-One
 ```
 
 From here you can run the frontend and backend independently using the instructions above.
+
+---
+
+## API Contract
+
+### `POST /api/v1/generate`
+
+Generates study materials (summary and quiz questions) from user notes.
+
+**Request Body:**
+
+```json
+{
+  "text": "string (required, non-empty)"
+}
+```
+
+**Response:**
+
+```json
+{
+  "summary": ["string", "string", "..."],
+  "quiz": [
+    {
+      "question": "string",
+      "options": ["string", "string", "string", "string"],
+      "answer": "string"
+    }
+  ]
+}
+```
+
+**Schema Files:**
+
+| Location | Description |
+|----------|-------------|
+| `shared/types.ts` | Canonical TypeScript interface definitions |
+| `frontend/src/types/api.ts` | Frontend TypeScript types (mirrors shared) |
+| `backend/main.py` | Pydantic models (mirrors shared contract) |
 
 ---
 

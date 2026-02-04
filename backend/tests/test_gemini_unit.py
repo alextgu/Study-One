@@ -66,7 +66,7 @@ Please ignore it.
 """
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from services.gemini import GeminiService
 
@@ -79,14 +79,17 @@ class TestGeminiService:
     # --------------------------------------------------
 
     def test_init_creates_model(self):
-        """Test that GeminiService initializes with the correct model."""
+        """Test that GeminiService initializes (lazy: no model until first call)."""
         service = GeminiService()
-        assert service.model is not None
+        assert service._model is None
+        assert service._model_name == "gemini-2.0-flash"
+        assert service._configured is False
 
     def test_init_with_custom_model(self):
         """Test that GeminiService accepts a custom model name."""
         service = GeminiService(model_name="gemini-1.5-pro")
-        assert service.model is not None
+        assert service._model is None
+        assert service._model_name == "gemini-1.5-pro"
 
     # --------------------------------------------------
     # API Call Tests (Success Cases)
@@ -96,16 +99,17 @@ class TestGeminiService:
     async def test_call_gemini_returns_text_on_success(self):
         """Test that call_gemini returns the response text on success."""
         service = GeminiService()
-        
-        # Mock the model's generate_content_async method
+        # Bypass lazy init (no API key in tests): inject mock model
         mock_response = MagicMock()
         mock_response.text = "This is a test response from Gemini."
-        service.model.generate_content_async = AsyncMock(return_value=mock_response)
+        service._model = MagicMock()
+        service._model.generate_content_async = AsyncMock(return_value=mock_response)
+        service._configured = True
         
         result = await service.call_gemini("Test prompt")
         
         assert result == "This is a test response from Gemini."
-        service.model.generate_content_async.assert_called_once_with("Test prompt")
+        service._model.generate_content_async.assert_called_once_with("Test prompt")
 
     # --------------------------------------------------
     # API Call Tests (Error Handling)
@@ -115,11 +119,11 @@ class TestGeminiService:
     async def test_call_gemini_returns_none_on_error(self):
         """Test that call_gemini returns None when an error occurs."""
         service = GeminiService()
-        
-        # Mock the model to raise an exception
-        service.model.generate_content_async = AsyncMock(
+        service._model = MagicMock()
+        service._model.generate_content_async = AsyncMock(
             side_effect=Exception("API Error")
         )
+        service._configured = True
         
         result = await service.call_gemini("Test prompt")
         
@@ -129,12 +133,24 @@ class TestGeminiService:
     async def test_call_gemini_handles_rate_limit_error(self):
         """Test that call_gemini handles rate limit errors gracefully."""
         service = GeminiService()
-        
-        # Mock a rate limit error
-        service.model.generate_content_async = AsyncMock(
+        service._model = MagicMock()
+        service._model.generate_content_async = AsyncMock(
             side_effect=Exception("429 Rate limit exceeded")
         )
+        service._configured = True
         
         result = await service.call_gemini("Test prompt")
         
         assert result is None
+
+    @pytest.mark.asyncio
+    @patch("services.gemini.os.getenv", return_value=None)
+    @patch("services.gemini.load_dotenv")
+    async def test_call_gemini_returns_none_when_api_key_missing(
+        self, mock_load_dotenv, mock_getenv
+    ):
+        """Test that call_gemini returns None when API key is not set (no crash)."""
+        service = GeminiService()
+        result = await service.call_gemini("Test prompt")
+        assert result is None
+        mock_getenv.assert_called()

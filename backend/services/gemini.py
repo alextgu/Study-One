@@ -5,20 +5,8 @@ import google.generativeai as genai
 from dotenv import load_dotenv
 
 
-# Load .env from the Study-One root (2 levels up from services/)
-# backend/services/gemini.py -> backend/ -> Study-One/
+# Path to .env (Study-One root): backend/services/gemini.py -> backend/ -> Study-One/
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
-load_dotenv(ROOT_DIR / ".env")
-
-# Validate API key at startup (fail fast)
-_api_key = os.getenv("GEMINI_API_KEY")
-if not _api_key:
-    raise EnvironmentError(
-        "GEMINI_API_KEY not found. Please set it in your .env file at the project root."
-    )
-
-# Configure Gemini with API key
-genai.configure(api_key=_api_key)
 
 
 class GeminiService:
@@ -28,10 +16,33 @@ class GeminiService:
         """
         Initialize the Gemini service.
 
-        Args:
-            model_name: The Gemini model to use (default: gemini-2.0-flash)
+        No env loading or API key validation runs here, so the app can start
+        without GEMINI_API_KEY (e.g. CI, unit tests). Validation happens
+        lazily on first call_gemini().
         """
-        self.model = genai.GenerativeModel(model_name)
+        self._model_name = model_name
+        self._model = None
+        self._configured = False
+
+    def _ensure_configured(self) -> bool:
+        """
+        Load .env and configure Gemini. Call once before first API use.
+        Returns False if GEMINI_API_KEY is missing (caller should return None / 500).
+        """
+        if self._configured:
+            return self._model is not None
+
+        self._configured = True
+        load_dotenv(ROOT_DIR / ".env")
+        api_key = os.getenv("GEMINI_API_KEY")
+
+        if not api_key or not api_key.strip():
+            print("[GeminiService] GEMINI_API_KEY not set. Set it in .env to use Gemini.")
+            return False
+
+        genai.configure(api_key=api_key)
+        self._model = genai.GenerativeModel(self._model_name)
+        return True
 
     async def call_gemini(self, prompt: str) -> str | None:
         """
@@ -42,9 +53,13 @@ class GeminiService:
 
         Returns:
             The raw string response from Gemini, or None if an error occurs
+            (including missing API key, so the endpoint can return 500/503).
         """
+        if not self._ensure_configured():
+            return None
+
         try:
-            response = await self.model.generate_content_async(prompt)
+            response = await self._model.generate_content_async(prompt)
             return response.text
         except Exception as e:
             # Log the error but don't crash the server

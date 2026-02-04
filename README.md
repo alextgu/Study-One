@@ -13,6 +13,7 @@ Follow the steps below to run the project locally.
 
 ## .env Format
 
+```env
 # Backend
 DATABASE_URL=
 JWT_SECRET=
@@ -21,6 +22,7 @@ GEMINI_API_KEY="YOUR_GEMINI_API_KEY"
 
 # Frontend
 NEXT_PUBLIC_API_URL=
+```
 
 ---
 
@@ -51,4 +53,5 @@ python -m venv venv
 # Windows: venv\Scripts\activate
 # Mac: source venv/bin/activate
 pip install -r requirements.txt
+uvicorn main:app --reload
 ```

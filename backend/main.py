@@ -1,9 +1,9 @@
 import json
-
+import re
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, field_validator
-
+from typing import List, Optional
 from services import GeminiService
 
 
@@ -57,6 +57,33 @@ class GenerateResponse(BaseModel):
     """
     summary: list[str]
     quiz: list[QuizQuestion]
+
+
+# ============================================
+# STUDY PACK REQUESTS
+# ============================================
+
+class StudyPackRequest(BaseModel):
+    """
+    Request body for POST /generate-study-pack
+    - text: The user's study notes to process
+    """
+    text: str
+    
+    @field_validator('text')
+    @classmethod
+    def validate_text(cls, v: str) -> str:
+        # do not iclude whitespace
+        stripped = v.strip()
+        # validate emptiness
+        if not v or not stripped:
+            raise ValueError("text must not be empty")
+        # validate length
+        if len(stripped) < 10:
+            raise ValueError(f"text must not be less than 10 characters")
+        if len(stripped) > 10000:
+            raise ValueError("text must not be more than 10000 characters")
+        return v
 
 
 # ============================================
@@ -175,6 +202,131 @@ Return ONLY valid JSON, no markdown or extra text."""
     except (KeyError, TypeError, ValueError) as e:
         print(f"[generate] Invalid response structure: {e}")
         print(f"[generate] Raw response: {response}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Invalid AI response format: {str(e)}"
+        )
+
+
+# ============================================
+# STUDY PACK ROUTE
+# ============================================
+
+
+# HELPER FUNCTIONS
+def clean_response(response):
+    """
+    Clean up Gemini response by removing markdown code blocks
+    """
+    # Clean up response if it has markdown code blocks
+    cleaned = response.strip() 
+    # remove opening markdown code fence
+    cleaned = re.sub(r'^```[a-z]*\n?', '', cleaned) 
+    # remove closing markdown code fence
+    cleaned = re.sub(r'```$', '', cleaned)
+
+    return cleaned.strip()
+
+
+def validate_structure(data):
+    """
+    Validate the study pack has all the required fields and return the list of quiz questions
+    """
+    
+    if not isinstance(data['summary'], list):
+        raise ValueError("Response missing 'summary'")
+    if not isinstance(data['quiz'], list):
+        raise ValueError("Response missing 'quiz'")
+
+    
+    # validate quiz structure
+    quiz_questions = []
+    for i, q in enumerate(data['quiz']):
+        if not isinstance(q, dict):
+                raise ValueError(f"Quiz item {i} is not correct")
+        if "question" not in q:
+            raise ValueError(f"Quiz item {i} missing 'question' field")
+        if "options" not in q or not isinstance(q['options'], list):
+            raise ValueError(f"Quiz item {i} missing 'options' field")
+        if "answer" not in q:
+            raise ValueError(f"Quiz item {i} missing 'answer' field")
+
+        quiz_questions.append(QuizQuestion(
+            question=q["question"],
+            options=q["options"],
+            answer=q["answer"]
+        ))
+
+    return quiz_questions
+
+
+@app.post("/generate-study-pack", response_model=GenerateResponse)
+async def generate_study_pack(request: StudyPackRequest):
+    """
+    Generate a study pack from user notes.
+    
+    Request:
+        - text: The user's study notes to process
+    
+    Returns:
+        - summary: list of bullet points summarizing the text
+        - quiz: list of quiz questions
+    """
+
+    prompt = f"""You are a study assistant. Based on the following notes, generate:
+1. A summary as a list of bullet points (3-5 key points)
+2. A quiz with 3 multiple choice questions
+
+Notes:
+{request.text}
+
+Respond in this exact JSON format:
+{{
+    "summary": ["point 1", "point 2", "point 3"],
+    "quiz": [
+        {{
+            "question": "Question text?",
+            "options": ["A", "B", "C", "D"],
+            "answer": "A"
+        }}
+    ]
+}}
+
+Return ONLY valid JSON, no markdown or extra text."""
+           
+    # Call Gemini API
+    response = await gemini_service.call_gemini(prompt)
+    
+    if response is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Gemini API is unavailable. Please ensure GEMINI_API_KEY is set in .env file."
+        )
+        
+    try:
+        # Clean up response if it has markdown code blocks
+        cleaned = clean_response(response)
+        
+        data = json.loads(cleaned)
+        
+        # Validate required fields exist
+        quiz_questions = validate_structure(data)
+        
+        return GenerateResponse(
+            summary=data['summary'],
+            quiz=quiz_questions
+        )
+    
+    except json.JSONDecodeError as e:
+        print(f"[generate-study-pack] Failed to parse JSON: {e}")
+        print(f"[generate-study-pack] Raw response: {response}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to parse AI response as JSON. Please try again."
+        )
+    except (KeyError, TypeError, ValueError) as e:
+        print(f"[generate-study-pack] Invalid response structure: {e}")
+        print(f"[generate-study-pack] Raw response: {response}")
         raise HTTPException(
             status_code=500,
             detail=f"Invalid AI response format: {str(e)}"

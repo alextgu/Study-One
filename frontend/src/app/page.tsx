@@ -70,7 +70,7 @@ export default function Home() {
               <div className="flex items-center gap-2 text-sm text-muted-foreground" aria-live="polite">
                 <span
                   className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent"
-                  aria-hidden
+                  aria-hidden={true}
                 />
                 <span>Generating your study pack…</span>
               </div>

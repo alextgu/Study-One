@@ -15,10 +15,19 @@ function Test-Endpoint {
         $status = $response.StatusCode
         $content = $response.Content
     } catch {
-        $status = [int]$_.Exception.Response.StatusCode
-        $stream = $_.Exception.Response.GetResponseStream()
-        $reader = New-Object System.IO.StreamReader($stream)
-        $content = $reader.ReadToEnd()
+        $resp = $_.Exception.Response
+
+        if ($resp -ne $null) {
+            # HTTP-level error (e.g. 4xx/5xx)
+            $status = [int]$resp.StatusCode
+            $stream = $resp.GetResponseStream()
+            $reader = New-Object System.IO.StreamReader($stream)
+            $content = $reader.ReadToEnd()
+        } else {
+            # Network-level error: no HTTP response available
+            $status = 0
+            $content = $_.Exception.Message
+        }
     }
     $ok = ($status -eq $ExpectedStatus)
     if ($ok) {

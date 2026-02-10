@@ -36,9 +36,8 @@ MOCK_GEMINI_RESPONSE = """{
 class TestGenerateEndpoint:
     """Integration tests for the generate endpoint."""
 
-    @pytest.mark.asyncio
     @patch.object(gemini_service, "call_gemini", new_callable=AsyncMock)
-    async def test_short_notes_returns_valid_json(self, mock_call_gemini):
+    def test_short_notes_returns_valid_json(self, mock_call_gemini):
         """Test short notes produce valid summary and quiz (no real API call)."""
         mock_call_gemini.return_value = MOCK_GEMINI_RESPONSE
 
@@ -61,9 +60,8 @@ class TestGenerateEndpoint:
             assert "options" in q
             assert "answer" in q
 
-    @pytest.mark.asyncio
     @patch.object(gemini_service, "call_gemini", new_callable=AsyncMock)
-    async def test_longer_notes_returns_valid_json(self, mock_call_gemini):
+    def test_longer_notes_returns_valid_json(self, mock_call_gemini):
         """Test longer notes produce valid summary and quiz (no real API call)."""
         mock_call_gemini.return_value = MOCK_GEMINI_RESPONSE
 
@@ -106,9 +104,8 @@ class TestGenerateEndpoint:
         )
         assert response.status_code == 422
 
-    @pytest.mark.asyncio
     @patch.object(gemini_service, "call_gemini", new_callable=AsyncMock)
-    async def test_gemini_failure_returns_500_with_meaningful_message(
+    def test_gemini_failure_returns_500_with_meaningful_message(
         self, mock_call_gemini
     ):
         """When Gemini fails, returns 500 with meaningful message."""
@@ -124,9 +121,8 @@ class TestGenerateEndpoint:
         assert "detail" in data
         assert "Failed to generate" in data["detail"]
 
-    @pytest.mark.asyncio
     @patch.object(gemini_service, "call_gemini", new_callable=AsyncMock)
-    async def test_invalid_gemini_response_returns_500_with_meaningful_message(
+    def test_invalid_gemini_response_returns_500_with_meaningful_message(
         self, mock_call_gemini
     ):
         """When Gemini returns invalid JSON, returns 500 with meaningful message."""

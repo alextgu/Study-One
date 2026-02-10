@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import type { FormEvent } from "react";
 import { generateStudyMaterials } from "@/lib/api";
 
 export default function Home() {
@@ -9,7 +10,10 @@ export default function Home() {
   const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const isEmpty = !notes.trim();
+  const isDisabled = isEmpty || loading;
+
   async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
     if (isDisabled) return;
 
     setLoading(true);
@@ -84,7 +88,7 @@ export default function Home() {
               <div className="flex items-center gap-2 text-sm text-muted-foreground" aria-live="polite">
                 <span
                   className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent"
-                  aria-hidden={true}
+                  aria-hidden="true"
                 />
                 <span>Generating your study pack…</span>
               </div>

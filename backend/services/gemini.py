@@ -33,7 +33,9 @@ class GeminiService:
             return self._model is not None
 
         self._configured = True
+        # Load shared/root env first, then allow backend/.env to override if present.
         load_dotenv(ROOT_DIR / ".env")
+        load_dotenv(ROOT_DIR / "backend" / ".env", override=True)  # backend/.env overrides root for backend config
         api_key = os.getenv("GEMINI_API_KEY")
 
         if not api_key or not api_key.strip():

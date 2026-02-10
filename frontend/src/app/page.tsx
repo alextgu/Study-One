@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { generateStudyMaterials } from "@/lib/api";
 
 export default function Home() {
   const [notes, setNotes] = useState("");
   const [loading, setLoading] = useState(false);
+  const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const isEmpty = !notes.trim();
   const isDisabled = isEmpty || loading;
@@ -25,9 +26,25 @@ export default function Home() {
     }
   }
 
+  useEffect(() => {
+    return () => {
+      if (previewTimerRef.current !== null) {
+        clearTimeout(previewTimerRef.current);
+        previewTimerRef.current = null;
+      }
+    };
+  }, []);
+
   function previewLoading() {
+    if (previewTimerRef.current !== null) {
+      clearTimeout(previewTimerRef.current);
+      previewTimerRef.current = null;
+    }
     setLoading(true);
-    setTimeout(() => setLoading(false), 3000);
+    previewTimerRef.current = setTimeout(() => {
+      previewTimerRef.current = null;
+      setLoading(false);
+    }, 3000);
   }
 
   return (

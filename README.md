@@ -1,6 +1,6 @@
 # Socrato
 
-Socrato is a full-stack AI study assistant that turns raw notes into concise summaries and practice questions. Socrato's goal is to help students study faster and more effectively before quizzes or exams. It has a Next.js frontend and FastAPI backend. 
+Socrato is a full-stack study assistant built around **augmentative AI**: it supports student thinking instead of replacing it. The app turns raw notes into concise summaries and practice questions so learners can review, reflect, and self-test more effectively before quizzes or exams. It has a Next.js frontend and FastAPI backend.
 
 
 ---

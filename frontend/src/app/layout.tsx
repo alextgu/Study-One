@@ -17,7 +17,8 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Socrato",
-  description: "AI-powered study materials generator",
+  description:
+    "An augmentative AI study assistant that helps students summarize notes and practice actively.",
 };
 
 export default function RootLayout({

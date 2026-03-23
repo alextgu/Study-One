@@ -7,6 +7,7 @@ import { usePathname } from "next/navigation";
 export function Header() {
   const pathname = usePathname();
   const isProfile = pathname === "/profile";
+  const isShop = pathname === "/shop";
   const [helpOpen, setHelpOpen] = useState(false);
 
   const helpTitle = isProfile ? "How to use your profile" : "How to use Socrato";
@@ -38,6 +39,13 @@ export function Header() {
             aria-current={isProfile ? "page" : undefined}
           >
             Profile
+          </Link>
+          <Link
+            href="/shop"
+            className="rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            aria-current={isShop ? "page" : undefined}
+          >
+            Shop
           </Link>
           {helpOpen && (
             <div

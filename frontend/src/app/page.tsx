@@ -426,9 +426,9 @@ export default function Home() {
             What we&apos;re building
           </h2>
           <p className="mt-3 text-sm leading-relaxed text-muted-foreground md:text-[15px]">
-            Socrato is for students who already have notes but need structure: a clear recap of what
-            matters, then questions that check understanding. Paste your notes once; get material you
-            can review before exams and track over time in your profile.
+            Socrato is built around <strong className="font-medium text-foreground">augmentative AI</strong>:
+            AI supports your study decisions instead of doing the learning for you. You bring your notes,
+            then use summaries, checks, and feedback loops to actively understand material before exams.
           </p>
           <ul className="mt-5 space-y-2.5 text-sm text-muted-foreground">
             <li className="flex gap-2">
@@ -436,8 +436,8 @@ export default function Home() {
                 ·
               </span>
               <span>
-                <strong className="font-medium text-foreground">Summaries</strong> distill your notes into
-                scannable bullet points.
+                <strong className="font-medium text-foreground">Augmented summaries</strong> compress your notes
+                into scannable bullets so you can verify and refine understanding faster.
               </span>
             </li>
             <li className="flex gap-2">
@@ -445,8 +445,8 @@ export default function Home() {
                 ·
               </span>
               <span>
-                <strong className="font-medium text-foreground">Quizzes</strong> with explanations help you
-                catch gaps before the test.
+                <strong className="font-medium text-foreground">AI fluency checks</strong> use quizzes +
+                explanations to expose gaps and prompt active correction (not passive delegation).
               </span>
             </li>
             <li className="flex gap-2">
@@ -454,8 +454,8 @@ export default function Home() {
                 ·
               </span>
               <span>
-                <strong className="font-medium text-foreground">Progress</strong> (when you&apos;re signed
-                in) ties practice to XP and streaks so studying stays visible.
+                <strong className="font-medium text-foreground">Gamified progress</strong> (when signed in)
+                ties effort to XP, streaks, and profile history so consistent studying is visible and rewarding.
               </span>
             </li>
           </ul>

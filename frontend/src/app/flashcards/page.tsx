@@ -27,6 +27,7 @@ type SortOption = "recent" | "oldest" | "shortest" | "longest";
 
 export default function FlashcardGalleryPage() {
   const { user } = useAuth();
+  const userId = user?.id ?? null;
   const [sets, setSets] = useState<FlashcardSetRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -35,7 +36,7 @@ export default function FlashcardGalleryPage() {
   const [topicFilter, setTopicFilter] = useState<string>("all");
 
   useEffect(() => {
-    if (!user) {
+    if (!userId) {
       setSets([]);
       setLoading(false);
       return;
@@ -49,7 +50,7 @@ export default function FlashcardGalleryPage() {
         const { data, error: dbError } = await supabase
           .from("flashcards")
           .select("id, topic, source_text, created_at, cards")
-          .eq("user_id", user.id)
+          .eq("user_id", userId)
           .order("created_at", { ascending: false });
 
         if (dbError) {
@@ -72,7 +73,7 @@ export default function FlashcardGalleryPage() {
     return () => {
       cancelled = true;
     };
-  }, [user]);
+  }, [userId]);
 
   const topics = useMemo(() => {
     const all = new Set<string>();

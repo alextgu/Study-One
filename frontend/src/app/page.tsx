@@ -91,7 +91,7 @@ export default function Home() {
   const [studyPack, setStudyPack] = useState<GenerateResponse | null>(null);
   const [flashcardSet, setFlashcardSet] = useState<FlashcardResponse | null>(null);
   const [flashcardError, setFlashcardError] = useState<string | null>(null);
-  const [saveFlashcardsToProfile, setSaveFlashcardsToProfile] = useState(false);
+  const [saveFlashcardsToProfile, setSaveFlashcardsToProfile] = useState(true);
   const [flashcardsSaved, setFlashcardsSaved] = useState(false);
   const [quizSetId, setQuizSetId] = useState<string | null>(null);
   const [quizAnswers, setQuizAnswers] = useState<(string | null)[]>([]);

@@ -1,7 +1,11 @@
 import json
 import logging
 import re
-from fastapi import Depends, FastAPI, HTTPException
+import os
+import asyncio
+from pathlib import Path
+
+from fastapi import Depends, FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, field_validator
 from services import GeminiService, get_supabase
@@ -11,15 +15,20 @@ from middleware.auth import require_user, UserPayload, user_for_generate
 from typing import List, Optional
 from enum import Enum
 from datetime import datetime, timezone
+from pypdf import PdfReader
+from pptx import Presentation
 
 logger = logging.getLogger(__name__)
 
-from prompts.study_gen_v1 import build_study_generation_prompt, validate_quiz_quality
+from prompts.study_gen_v1 import build_study_generation_prompt, validate_quiz_quality, build_summary_only_prompt
 from prompts.flashcard_gen_v1 import build_flashcard_generation_prompt
 from prompts.quiz_gen_v1 import build_quiz_generation_prompt
-
+from prompts.slide_text_gen_v1 import build_chunk_summary_prompt, build_merge_outline_prompt
 
 app = FastAPI(title="Socrato")
+UPLOAD_DIR = Path(__file__).resolve().parent / "uploads" / "slides"
+MAX_UPLOAD_SIZE_BYTES = 25 * 1024 * 1024
+CHUNKING_THRESHOLD_CHARS = 18000
 
 # Initialize Gemini service
 gemini_service = GeminiService()
@@ -363,6 +372,18 @@ class GenerateQuizResponse(BaseModel):
     quiz_set_id: str
     quiz: list[QuizQuestion]
 
+class SlideQuizRegenerateRequest(BaseModel):
+    """Request body for POST /api/v1/slides/quiz/regenerate."""
+    text: str
+
+    @field_validator("text")
+    @classmethod
+    def text_must_not_be_empty(cls, v: str) -> str:
+        v = check_empty_text(v)
+        if len(v.strip()) < 10:
+            raise ValueError("text must not be less than 10 characters")
+        return v
+
 class QuestionAnswer(BaseModel):
     question_index: int
     selected_answer: str
@@ -555,7 +576,6 @@ async def generate_quiz_questions(
 
 
     return GenerateQuizResponse(quiz_set_id=quiz_set_id, quiz=quiz_questions)
-    
 
 @app.post("/api/v1/quiz/attempt", response_model=QuizSubmitResponse)
 async def submit_quiz_attempt(
@@ -1016,3 +1036,337 @@ async def get_card_history(
     latest_per_card.sort(key=lambda x: RATING_PRIORITY.get(x["rating"], 99))
 
     return {"history": latest_per_card}
+
+
+# SLIDE UPLOAD SYSTEM
+class SlideStudyPackResponse(BaseModel):
+    """Response from POST /api/v1/slides/study-pack."""
+    file_name: str
+    stored_path: str
+    quiz_set_id: str
+    flashcard_set_id: str
+    extracted_text: str
+    summary: List[str]
+    quiz: List[QuizQuestion]
+    flashcards: List[Flashcard]
+
+def extract_pdf(file: Path) -> str:
+    pdf = PdfReader(str(file))
+    extracted = [page.extract_text() or "" for page in pdf.pages]
+    return "\n".join(extracted).strip()
+
+def extract_pptx(file: Path) -> str:
+    pptx = Presentation(str(file))
+    extracted = []
+    for slide in pptx.slides:
+        for shape in slide.shapes:
+            if hasattr(shape, "text") and shape.text:
+                extracted.append(shape.text)
+    return "\n".join(extracted).strip() 
+
+def get_name(file_name: str) -> str:
+    name = re.sub(r"[^A-Za-z0-9._-]+", "_", file_name).strip("._")
+    return name or "slides"
+
+async def save_file(file: UploadFile) -> Path: 
+    file_type = Path(file.filename or "").suffix.lower()
+    file_name = get_name(Path(file.filename or "slides").stem)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    saved_name = f"{file_name}_{timestamp}{file_type}" 
+
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    dest = UPLOAD_DIR / saved_name
+
+    size = 0
+    with dest.open("wb") as f:
+        while True:
+            chunk = await file.read(1024 * 1024)
+            if not chunk:
+                break
+            size += len(chunk)
+            if size > MAX_UPLOAD_SIZE_BYTES:
+                dest.unlink(missing_ok=True)
+                raise HTTPException(
+                    status_code=413,
+                    detail="File is too large. Please upload a file under 25MB.",
+                )
+            f.write(chunk)
+    await file.close()
+    return dest
+
+def chunk_text(content: str, chunk_size: int = 12000, overlap: int = 1000) -> list[str]:
+    "Split long extracted text into chunks"
+    cleaned = content.strip()
+    if not cleaned: 
+        return []
+    if len(cleaned) <= chunk_size:
+        return [cleaned]
+
+    chunks = []
+    step = max(1, chunk_size - overlap)
+    start = 0
+    while start < len(cleaned):
+        end = min(len(cleaned), start + chunk_size)
+        chunk = cleaned[start: end].strip()
+        if chunk: chunks.append(chunk)
+        if end >= len(cleaned):
+            break
+        start += step
+    return chunks
+
+
+async def summarize_chunk(index: int, chunk: str, chunks: list[str]) -> tuple[list[str], list[str]]:
+    chunk_prompt = build_chunk_summary_prompt(chunk, index + 1, len(chunks))
+    chunk_response = await gemini_service.call_gemini(chunk_prompt) 
+    if chunk_response is None:
+            raise HTTPException(status_code=500, detail="Failed to summarize chunk of slide.")
+    try:
+        cleaned = json.loads(clean_response(chunk_response))
+        response_summary = cleaned.get("summary",[])
+        response_facts = cleaned.get("key_facts", [])
+        summary = []
+        key_facts = []
+        if isinstance(response_summary, list):
+            summary = [str(s).strip() for s in response_summary if str(s).strip()]
+        if isinstance(response_facts, list):
+            key_facts = [str(kf).strip() for kf in response_facts if str(kf).strip()]
+        return summary, key_facts
+    except json.JSONDecodeError as e:
+            logger.warning("[slides chunk] Failed to parse Gemini JSON: %s", e)
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to parse AI response as JSON. Please try again."
+            )    
+
+async def get_study_pack_responses(text: str):
+    quiz_prompt = build_quiz_generation_prompt(content=text)
+    flashcards_prompt = build_flashcard_generation_prompt(content=text, mode="notes")
+    quiz_response, flashcards_response = await asyncio.gather(
+        gemini_service.call_gemini(quiz_prompt),
+        gemini_service.call_gemini(flashcards_prompt),
+    )
+    if quiz_response is None:
+        raise HTTPException(status_code=500, detail="Failed to generate quiz.")
+    if flashcards_response is None:
+        raise HTTPException(status_code=500, detail="Failed to generate flashcards.")
+    return quiz_response, flashcards_response
+    
+
+async def generate_study_pack_slides(text: str) -> tuple[list[str], list[QuizQuestion], list[Flashcard]]:
+    text = text.strip()
+    # if no text
+    if not text: 
+        raise HTTPException(status_code=422, detail="No text found in slides, not able to generate study pack")
+    # if text not require chunking
+    if len(text) < CHUNKING_THRESHOLD_CHARS:
+        study_prompt = build_summary_only_prompt(user_notes=text, num_points=5)
+        study_response = await gemini_service.call_gemini(study_prompt)
+        if study_response is None:
+            raise HTTPException(status_code=500, detail="Failed to generate summary.")
+        
+        quiz_response, flashcards_response = await get_study_pack_responses(text)
+
+        try:
+            study_data = json.loads(clean_response(study_response))
+            summary = study_data.get("summary", [])
+            if not isinstance(summary, list):
+                raise ValueError("Response missing 'summary' array")
+            summary = [str(item).strip() for item in summary if str(item).strip()]
+            if not summary:
+                raise ValueError("Response missing non-empty summary items")
+            quiz_questions = parse_and_validate_quiz(quiz_response)
+            flashcards = parse_and_validate_flashcards(flashcards_response)
+            return summary, quiz_questions, flashcards
+        except json.JSONDecodeError as e:
+            logger.warning("[slides] Failed to parse Gemini JSON: %s", e)
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to parse AI response as JSON. Please try again."
+            )
+        except (KeyError, TypeError, ValueError) as e:
+            logger.warning("[slides] Invalid Gemini response structure: %s", e)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Invalid AI response format: {str(e)}"
+            )
+
+    # else, chunk the text and merge
+    chunks = chunk_text(text)
+    if not chunks:
+        raise HTTPException(status_code=422, detail="No text found in slides, not able to generate study pack")
+
+    chunk_results = await asyncio.gather(
+        *(summarize_chunk(index, chunk, chunks) for index, chunk in enumerate(chunks))
+    )
+
+    chunk_summaries = []
+    chunk_facts = []
+    for summaries, facts in chunk_results:
+        chunk_summaries.extend(summaries)
+        chunk_facts.extend(facts)
+    
+    if not chunk_summaries and not chunk_facts:
+        raise HTTPException(status_code=500, detail="No usable content produced from slide chunks.")
+    
+    merge_prompt = build_merge_outline_prompt(chunk_summaries, chunk_facts)
+    merge_response = await gemini_service.call_gemini(merge_prompt)
+    if not merge_response:
+        raise HTTPException(status_code=422, detail="Failed to merge chunks summaries/facts.")
+    
+    try:
+        merged = json.loads(clean_response(merge_response))
+        outline = merged.get("outline", [])
+        summary = merged.get("summary", [])
+        if not isinstance(outline, list) or not outline:
+            raise ValueError("Merged outline missing or empty")
+        if not isinstance(summary, list) or not summary:
+            raise ValueError("Merged summary missing or empty")
+        canonical_outline = "\n".join(f"- {str(item).strip()}" for item in outline if str(item).strip())
+        if not canonical_outline.strip():
+            raise ValueError("Merged outline empty after cleanup")
+        summary = [str(item).strip() for item in summary if str(item).strip()]
+        if not summary:
+            raise ValueError("Merged summary empty after cleanup")
+    except json.JSONDecodeError as e:
+            logger.warning("[slides merge] Failed to parse Gemini JSON: %s", e)
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to parse AI response as JSON. Please try again."
+            )
+    
+    quiz_response, flashcards_response = await get_study_pack_responses(canonical_outline)
+    try:
+        quiz_questions = parse_and_validate_quiz(quiz_response)
+        flashcards = parse_and_validate_flashcards(flashcards_response)
+        return summary, quiz_questions, flashcards
+    except json.JSONDecodeError as e:
+        logger.warning("[slides merge] Failed to parse Gemini JSON: %s", e)
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to parse AI response as JSON. Please try again."
+        )
+    except (KeyError, TypeError, ValueError) as e:
+        logger.warning("[slides merge] Invalid Gemini response structure: %s", e)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Invalid AI response format: {str(e)}"
+        )
+
+@app.post("/api/v1/slides/study-pack", response_model=SlideStudyPackResponse)
+async def generate_study_pack_from_slides(
+        file: UploadFile = File(...), 
+        user: Optional[UserPayload] = Depends(user_for_generate),
+):
+    filename = file.filename or "slides"
+    suffix = Path(filename).suffix.lower()
+    valid_suffixes = {".pdf", ".pptx"}
+    valid_content_types = {
+        "application/pdf",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    }
+
+    if suffix not in valid_suffixes and (file.content_type or "") not in valid_content_types:
+        raise HTTPException(
+            status_code=400,
+            detail="Unsupported file type. Please upload a PDF or PPTX file.",
+        )
+
+    stored_path = await save_file(file)
+
+    try:
+        if stored_path.suffix.lower() == ".pdf":
+            extracted = extract_pdf(stored_path)
+        else:
+            extracted = extract_pptx(stored_path)
+    except Exception as e:
+        logger.warning("[slide extract] Slide extraction failed for %s: %s", stored_path, e)
+        raise HTTPException(
+            status_code=400,
+            detail="Could not extract text from this file. Please try another PDF or PPTX.",
+        )
+    
+    if len(extracted.strip()) == 0:
+        raise HTTPException(
+            status_code=422,
+            detail="No text found in uploaded slides, cannot generate study pack.",
+        )
+    
+    summary, quiz_questions, flashcards = await generate_study_pack_slides(extracted)
+    quiz_set_id = None
+    flashcard_set_id = None
+    # save quiz and flashcards to database
+    sb = get_supabase()
+    try:
+        quiz_result = sb.table("quiz").insert({
+            "user_id": user["user_id"] if user else "00000000-0000-0000-0000-000000000001",
+            "source_text": f"Generated from slides: {filename}",
+            "questions": [q.model_dump() for q in quiz_questions],
+        }).execute()
+        quiz_set_id = quiz_result.data[0]["id"]
+    except Exception as e:
+        logger.warning("[slides study-pack] Failed to store quiz: %s", e)
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to store generated quiz. Please try again.",
+        )
+    try:
+        flashcards_result = sb.table("flashcards").insert({
+            "user_id": user["user_id"] if user else "00000000-0000-0000-0000-000000000001",
+            "source_text": f"Generated from slides: {filename}",
+            "topic": "Slides upload",
+            "cards": [fc.model_dump() for fc in flashcards],
+        }).execute()
+        flashcard_set_id = flashcards_result.data[0]["id"]
+    except Exception as e:
+        logger.warning("[slides study-pack] Failed to store flashcards: %s", e)
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to store generated flashcards. Please try again.",
+        )
+
+    return SlideStudyPackResponse(
+        file_name=filename,
+        stored_path=str(stored_path),
+        quiz_set_id=quiz_set_id,
+        flashcard_set_id=flashcard_set_id,
+        extracted_text=extracted,
+        summary=summary,
+        quiz=quiz_questions,
+        flashcards=flashcards,
+    )
+
+
+@app.post("/api/v1/slides/quiz/regenerate", response_model=GenerateQuizResponse)
+async def regenerate_slide_quiz_questions(
+    request: SlideQuizRegenerateRequest,
+    user: UserPayload | None = Depends(user_for_generate),
+):
+    """Regenerate quiz from extracted slide text without StudyPackRequest size cap."""
+    prompt = build_quiz_generation_prompt(content=request.text)
+    response = await gemini_service.call_gemini(prompt)
+
+    if response is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to regenerate quiz. Please try again.",
+        )
+
+    quiz_questions = parse_and_validate_quiz(response)
+
+    sb = get_supabase()
+    try:
+        result = sb.table("quiz").insert({
+            "user_id": user["user_id"] if user else "00000000-0000-0000-0000-000000000001",
+            "source_text": request.text,
+            "questions": [q.model_dump() for q in quiz_questions],
+        }).execute()
+        quiz_set_id = result.data[0]["id"]
+    except Exception as e:
+        logger.warning("[slides quiz regenerate] DB insert failed: %s", e)
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to store regenerated quiz. Please try again.",
+        )
+
+    return GenerateQuizResponse(quiz_set_id=quiz_set_id, quiz=quiz_questions)
+    

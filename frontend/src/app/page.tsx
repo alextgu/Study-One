@@ -3,9 +3,11 @@
 import { useState, useRef, useEffect } from "react";
 import type { FormEvent } from "react";
 import {
+  generateStudyPackFromSlides,
   generateStudyPack,
   generateFlashcards,
   generateQuizQuestions,
+  regenerateSlideQuizQuestions,
   requestQuizExplanation,
   submitFlashcardReview,
   submitFlashcardSessionComplete,
@@ -86,6 +88,7 @@ function buildPreviewSubmitResult(
 
 export default function Home() {
   const [notes, setNotes] = useState("");
+  const [slideExtractedText, setSlideExtractedText] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [studyPack, setStudyPack] = useState<GenerateResponse | null>(null);
@@ -93,16 +96,57 @@ export default function Home() {
   const [flashcardError, setFlashcardError] = useState<string | null>(null);
   const [saveFlashcardsToProfile, setSaveFlashcardsToProfile] = useState(true);
   const [flashcardsSaved, setFlashcardsSaved] = useState(false);
+  const [slideUploadLoading, setSlideUploadLoading] = useState(false);
+  const [slideUploadInfo, setSlideUploadInfo] = useState<string | null>(null);
   const [quizSetId, setQuizSetId] = useState<string | null>(null);
   const [quizAnswers, setQuizAnswers] = useState<(string | null)[]>([]);
   const [quizLoading, setQuizLoading] = useState(false);
   const [submitResult, setSubmitResult] = useState<QuizSubmitResponse | null>(null);
   const [submitQuizLoading, setSubmitQuizLoading] = useState(false);
   const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const slideInputRef = useRef<HTMLInputElement | null>(null);
   const { user } = useAuth();
 
   const isEmpty = !notes.trim();
   const isDisabled = isEmpty || loading;
+
+  async function handleSlidesUpload(file: File) {
+    if (slideUploadLoading || loading) return;
+    if (!user) {
+      setSlideUploadInfo(null);
+      setErrorMessage("Please log in to upload slides.");
+      return;
+    }
+    setSlideUploadLoading(true);
+    setSlideUploadInfo(null);
+    setErrorMessage(null);
+    setFlashcardError(null);
+    setSlideExtractedText(null);
+    setSubmitResult(null);
+
+    try {
+      const includeAuthForFlashcards = saveFlashcardsToProfile && !!user;
+      const slideResponse = await generateStudyPackFromSlides(file);
+      setStudyPack({ summary: slideResponse.summary, quiz: slideResponse.quiz });
+      setSlideExtractedText(slideResponse.extracted_text || null);
+      const resolvedFlashcardSetId =
+        slideResponse.flashcard_set_id ?? `slides-${Date.now()}`;
+      setFlashcardSet({
+        flashcard_set_id: resolvedFlashcardSetId,
+        flashcards: slideResponse.flashcards,
+      });
+      setFlashcardsSaved(Boolean(slideResponse.flashcard_set_id) && includeAuthForFlashcards);
+      setQuizSetId(slideResponse.quiz_set_id ?? null);
+      setQuizAnswers(Array(slideResponse.quiz.length).fill(null));
+      setSlideUploadInfo(`Uploaded ${slideResponse.file_name} and generated study content.`);
+    } catch (err) {
+      console.error("Failed to process slides:", err);
+      setSlideUploadInfo(null);
+      setErrorMessage(toUserFriendlyMessage(err));
+    } finally {
+      setSlideUploadLoading(false);
+    }
+  }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -115,6 +159,7 @@ export default function Home() {
     setSubmitResult(null);
     setErrorMessage(null);
     setFlashcardError(null);
+    setSlideExtractedText(null);
     setFlashcardsSaved(false);
     setLoading(true);
 
@@ -152,12 +197,19 @@ export default function Home() {
   }
 
   async function handleGenerateQuiz() {
-    if (!studyPack || quizLoading || !notes.trim()) return;
+    if (!studyPack || quizLoading) return;
+    const sourceText =
+      notes.trim() ||
+      (slideExtractedText ?? "").trim() ||
+      studyPack.summary.join("\n").trim();
+    if (!sourceText) return;
     setErrorMessage(null);
     setSubmitResult(null);
     setQuizLoading(true);
     try {
-      const quizResponse = await generateQuizQuestions(notes.trim());
+      const quizResponse = slideExtractedText
+        ? await regenerateSlideQuizQuestions(sourceText)
+        : await generateQuizQuestions(sourceText);
       setStudyPack((prev) =>
         prev ? { ...prev, quiz: quizResponse.quiz } : null,
       );
@@ -322,6 +374,33 @@ export default function Home() {
             Paste notes from any course. We&apos;ll generate a summary; then you can add a quiz from the
             same text.
           </p>
+
+          <div className="mb-4 flex items-center gap-3">
+            <input
+              ref={slideInputRef}
+              type="file"
+              accept=".pdf,.pptx,application/pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation"
+              className="sr-only"
+              disabled={slideUploadLoading || loading}
+              onChange={(e) => {
+                const selected = e.target.files?.[0] ?? null;
+                if (!selected) return;
+                void handleSlidesUpload(selected);
+                e.currentTarget.value = "";
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => slideInputRef.current?.click()}
+              disabled={slideUploadLoading || loading}
+              className="rounded-md border border-input bg-background px-2.5 py-1 text-xs font-medium hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
+            >
+              {slideUploadLoading ? "Processing..." : "Upload slides"}
+            </button>
+            {slideUploadInfo && (
+              <span className="text-xs text-muted-foreground">{slideUploadInfo}</span>
+            )}
+          </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <label htmlFor="notes" className="sr-only">
@@ -545,7 +624,7 @@ export default function Home() {
 
             {/* Quiz Section */}
             {studyPack.quiz.length > 0 && (
-              <section className="rounded-2xl border border-border bg-card p-6 shadow-sm">
+              <section className="rounded-lg border border-border bg-card p-6">
                 <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                   <h3 className="text-lg font-semibold">Quiz</h3>
                   {!quizLoading && (

@@ -72,6 +72,18 @@ export interface FlashcardResponse {
   flashcards: Flashcard[];
 }
 
+/** Response from POST /api/v1/slides/study-pack. */
+export interface SlideStudyPackResponse {
+  file_name: string;
+  stored_path: string;
+  quiz_set_id: string;
+  flashcard_set_id: string;
+  extracted_text: string;
+  summary: string[];
+  quiz: QuizQuestion[];
+  flashcards: Flashcard[];
+}
+
 /** Anki-style rating values for a flashcard review. */
 export type AnkiRating = "again" | "hard" | "good" | "easy";
 

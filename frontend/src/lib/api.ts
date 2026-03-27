@@ -13,6 +13,7 @@ import type {
   GenerateRequest,
   GenerateResponse,
   GenerateQuizResponse,
+  SlideStudyPackResponse,
   QuizResultResponse,
   QuizExplanationResponse,
   QuizSubmitRequest,
@@ -93,6 +94,46 @@ export async function generateStudyPack(
   return response.json();
 }
 
+export async function generateStudyPackFromSlides(
+  file: File,
+): Promise<SlideStudyPackResponse> {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  let token: string | null;
+  try {
+    token = await getAccessToken();
+  } catch (err) {
+    console.error("Failed to retrieve access token:", err);
+    token = null;
+  }
+
+  const headers: Record<string, string> = {};
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}/api/v1/slides/study-pack`, {
+      method: "POST",
+      headers,
+      body: formData,
+    });
+  } catch {
+    throw new Error(
+      `Cannot reach backend at ${API_BASE_URL}. Check that the API is running and CORS allows this frontend origin.`,
+    );
+  }
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || `Request failed with status ${response.status}`);
+  }
+
+  return response.json();
+}
+
 /**
  * Generates a flashcard set from user notes or topic.
  * Stores the set in Supabase and returns the cards plus set id.
@@ -157,10 +198,41 @@ export async function submitFlashcardReview(
 export async function generateQuizQuestions(
   text: string
 ): Promise<GenerateQuizResponse> {
+  const normalized = text.trim();
+  if (normalized.length < 10) {
+    throw new Error("Please provide at least 10 characters to generate a quiz.");
+  }
+  const payloadText = normalized.slice(0, 10000);
+
   const response = await fetch(`${API_BASE_URL}/api/v1/quiz`, {
     method: "POST",
     headers: await authHeaders(),
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text: payloadText }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || `Request failed with status ${response.status}`);
+  }
+
+  return response.json();
+}
+
+/**
+ * Regenerates quiz questions from extracted slide text via POST /api/v1/slides/quiz/regenerate.
+ */
+export async function regenerateSlideQuizQuestions(
+  text: string
+): Promise<GenerateQuizResponse> {
+  const normalized = text.trim();
+  if (normalized.length < 10) {
+    throw new Error("Please provide at least 10 characters to generate a quiz.");
+  }
+
+  const response = await fetch(`${API_BASE_URL}/api/v1/slides/quiz/regenerate`, {
+    method: "POST",
+    headers: await authHeaders(),
+    body: JSON.stringify({ text: normalized }),
   });
 
   if (!response.ok) {

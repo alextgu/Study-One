@@ -52,6 +52,32 @@ The biggest gap the research flags is consistency of use. The spacing algorithm 
 
 ---
 
+## Algorithm Implementation
+
+### SM-2
+ 
+SM-2 is the algorithm developed by Piotr Wozniak in 1987 and is the foundation of Anki. It is the simplest production-ready option and can be implemented in a few dozen lines of code.
+ 
+Each card tracks three values: the **interval** (days until next review), the **repetition count**, and an **ease factor** (a floating point number starting at 2.5, minimum 1.3) that reflects how difficult the card has been historically. After each review, the user rates recall quality on a 0–5 scale, and the algorithm updates accordingly:
+ 
+- If quality ≥ 3 (correct response): interval is multiplied by the ease factor on subsequent reviews; rep count increments.
+- If quality < 3 (incorrect): interval resets to 1 day; rep count resets to 0.
+- The ease factor is adjusted after every review: `EF' = EF + (0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02))`.
+ 
+The Again / Hard / Good / Easy buttons in Socrato's current flashcard UI map cleanly to this. They also just need to translate to a quality score (e.g., Again = 1, Hard = 2, Good = 4, Easy = 5) and persist the resulting interval, rep count, and ease factor per card per user in the database. (This is my TODO for the week as well)
+
+### What to Log for the Algorithm
+ 
+For SM-2, each review event needs:
+- `card_id`
+- `user_id`
+- `reviewed_at` (timestamp)
+- `quality` (0–5 or mapped from Again/Hard/Good/Easy)
+- `interval_before` and `interval_after`
+- `ease_factor_before` and `ease_factor_after`
+
+---
+
 ## References
 
 - Roediger, H. L., & Karpicke, J. D. (2006). Test-enhanced learning. *Psychological Science*, 17(3), 249–255.

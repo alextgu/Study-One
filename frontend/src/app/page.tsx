@@ -6,12 +6,14 @@ import {
   generateStudyPack,
   generateFlashcards,
   generateQuizQuestions,
+  logSessionAbandon,
   requestQuizExplanation,
   submitFlashcardReview,
   submitFlashcardSessionComplete,
   submitQuiz,
   submitQuizResult,
 } from "@/lib/api";
+import { getAccessToken } from "@/lib/auth";
 import {
   type AnkiRating,
   type Flashcard,
@@ -99,6 +101,8 @@ export default function Home() {
   const [submitResult, setSubmitResult] = useState<QuizSubmitResponse | null>(null);
   const [submitQuizLoading, setSubmitQuizLoading] = useState(false);
   const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const quizStartTimeRef = useRef<number | null>(null);
+  const quizCachedTokenRef = useRef<string | null>(null);
   const { user } = useAuth();
 
   const isEmpty = !notes.trim();
@@ -163,6 +167,9 @@ export default function Home() {
       );
       setQuizSetId(quizResponse.quiz_set_id);
       setQuizAnswers(Array(quizResponse.quiz.length).fill(null));
+      quizStartTimeRef.current = Date.now();
+      // Cache token for beforeunload use
+      getAccessToken().then((t) => { quizCachedTokenRef.current = t; }).catch(() => {});
     } catch (err) {
       console.error("Failed to generate quiz:", err);
       setErrorMessage(toUserFriendlyMessage(err));
@@ -225,6 +232,29 @@ export default function Home() {
       }
     };
   }, []);
+
+  // Log quiz abandonment when user leaves with an active, unsubmitted quiz
+  useEffect(() => {
+    function handleBeforeUnload() {
+      if (!quizSetId || submitResult || quizStartTimeRef.current === null) return;
+      const answeredCount = quizAnswers.filter((a) => a !== null).length;
+      if (answeredCount === 0) return;
+      const durationS = Math.round((Date.now() - quizStartTimeRef.current) / 1000);
+      logSessionAbandon(
+        quizSetId,
+        "quiz",
+        {
+          sessionDurationS: durationS,
+          questionsAnswered: answeredCount,
+          totalQuestions: quizAnswers.length,
+        },
+        quizCachedTokenRef.current,
+      );
+    }
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [quizSetId, submitResult, quizAnswers]);
 
   function previewLoading() {
     if (previewTimerRef.current !== null) {

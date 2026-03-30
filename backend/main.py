@@ -140,6 +140,24 @@ class FlashcardSessionCompleteResponse(BaseModel):
     xp_awarded: int
     user_stats: dict
 
+class StudySessionStartRequest(BaseModel):
+    """Request body for POST /api/v1/study/session-start."""
+    resource_id: str
+    resource_type: str  # "flashcard_set" | "quiz"
+    session_id: Optional[str] = None
+
+
+class StudyAbandonRequest(BaseModel):
+    """Request body for POST /api/v1/study/abandon."""
+    resource_id: str
+    resource_type: str  # "flashcard_set" | "quiz"
+    session_id: Optional[str] = None
+    session_duration_s: Optional[int] = None
+    cards_reviewed: Optional[int] = None
+    questions_answered: Optional[int] = None
+    total_questions: Optional[int] = None
+
+
 class QuizExplanationRequest(BaseModel):
     """
     Request body for POST /api/v1/quiz/explain
@@ -1149,3 +1167,49 @@ async def export_study_events(user: UserPayload = Depends(require_user)):
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=study_events.csv"},
     )
+
+
+# ============================================
+# STUDY SESSION LOGGING
+# ============================================
+
+@app.post("/api/v1/study/session-start")
+async def log_session_start(
+    request: StudySessionStartRequest,
+    user: UserPayload = Depends(require_user),
+    x_session_id: Optional[str] = Header(None),
+):
+    """Log that a user started a study session (flashcard set or quiz)."""
+    sb = get_supabase()
+    _log_study_event(
+        sb, "study_session_start", user["user_id"],
+        session_id=request.session_id or x_session_id,
+        resource_id=request.resource_id,
+        resource_type=request.resource_type,
+    )
+    return {"logged": True}
+
+
+@app.post("/api/v1/study/abandon")
+async def log_session_abandon(
+    request: StudyAbandonRequest,
+    user: UserPayload = Depends(require_user),
+    x_session_id: Optional[str] = Header(None),
+):
+    """Log that a user abandoned a quiz or flashcard session mid-way."""
+    event_type = (
+        "flashcard_abandoned" if request.resource_type == "flashcard_set"
+        else "quiz_abandoned"
+    )
+    sb = get_supabase()
+    _log_study_event(
+        sb, event_type, user["user_id"],
+        session_id=request.session_id or x_session_id,
+        resource_id=request.resource_id,
+        resource_type=request.resource_type,
+        session_duration_s=request.session_duration_s,
+        cards_reviewed=request.cards_reviewed,
+        quiz_total=request.total_questions,
+        quiz_correct=request.questions_answered,
+    )
+    return {"logged": True}

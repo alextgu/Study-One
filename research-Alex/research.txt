@@ -1,0 +1,54 @@
+Research consistently confirms that "working with an expert personal tutor is generally regarded as 
+the most efficient form of education" (Kestin et al., 2025). This is because a tutor can adapt to the 
+individual ability and specific needs of a student, whereas traditional university structures—often 
+involving one teacher working with hundreds of students—suffer from systemic inefficiencies. These 
+passive classroom environments inherently fail to cater to every individual, as the instruction 
+often moves "too quickly for some students and too slowly for others because the teacher controls 
+the pace" (Kestin et al., 2025). While personal tutoring is ideal, it is practically impossible 
+to meet the needs of a diverse and large student body. As AI becomes intertwined with the student 
+experience, many are turning to chatbots to fill institutional gaps; however, this shift poses new 
+risks. Most commercial AI chatbots are "generally designed to be helpful, not to promote learning". 
+This "unguided use" often allows students to complete their assignments without actually engaging in 
+critical thinking, essentially using the technology as a shortcut, creating a dangerous cycle of 
+over-reliance and inefficient studying which can "diminish human agency and critical thinking for 
+both students and educators" (Cotilla Conceição & van der Stappen, 2025). 
+
+The empirical evidence for structured AI tutoring reveals significant advantages in both performance
+ and time efficiency. A randomized controlled trial demonstrated that students using a custom-built 
+ AI tutor learned significantly more than those in a traditional active learning classroom, with the 
+ AI group achieving a median post-test score of 4.5 compared to 3.5 in the control group 
+ (Kestin et al., 2025). Furthermore, 70% of students in the AI group reached these milestones in 
+ under 60 minutes, with a median time on task of only 49 minutes, and quantile regression analysis 
+ indicated a substantial effect size in the range of 0.73 to 1.3 standard deviations 
+ (Kestin et al., 2025). This efficiency is largely attributed to the AI's capacity for "personalized 
+ feedback on demand" and "self-pacing," which allows students to fill unique conceptual gaps without 
+ being "tethered to a synchronous lecture" (Kestin et al., 2025). By using detailed, step-by-step 
+ solutions to guide students through sequential problems, structured systems can maintain high 
+ engagement while mitigating the "hallucinations" common in unguided large language models.
+However, the implementation of AI-assisted learning must navigate "persistent problems" regarding 
+inequitable access and ethical governance (Cotilla Conceição & van der Stappen, 2025). Higher 
+education systems frequently fail to support "first-generation students," "minorities," and those 
+from "low-income backgrounds" due to a lack of inclusive practices and "socioeconomic inequality" 
+(Cotilla Conceição & van der Stappen, 2025). While current AI adoptions often focus on "institutional 
+efficiency rather than fostering equity," research suggests that "culturally responsive AI tasks" 
+can empower marginalized learners by allowing them to leverage lived experiences 
+(Cotilla Conceição & van der Stappen, 2025). Ethical concerns also persist regarding the "black box" 
+nature of AI algorithms, which creates a "lack of transparency" that makes it difficult to identify 
+or correct "algorithmic bias" (Cotilla Conceição & van der Stappen, 2025). To address these challenges, 
+researchers advocate for a "flipped classroom" approach where AI is used to bring all students to 
+a baseline level of understanding before class, reserving in-person time for "higher-order skills 
+such as advanced problem solving" (Kestin et al., 2025; Cotilla Conceição & van der Stappen, 2025). 
+This framework ensures AI remains a "tool for students" that supports the development of critical
+ thinking rather than replacing human autonomy (Cotilla Conceição & van der Stappen, 2025).
+
+
+
+References
+----------
+
+Cotilla Conceição, J. M., & van der Stappen, E. (2025). The impact of AI on inclusivity in higher 
+education: A rapid review. Education Sciences, 15(9), 1255 . https://doi.org/10.3390/educsci15091255
+
+Kestin, G., Miller, K., Klales, A., Milbourne, T., & Ponti, G. (2025). AI tutoring outperforms 
+in-class active learning: An RCT introducing a novel research-based design in an authentic 
+educational setting. Scientific Reports, 15, 17458 . https://doi.org/10.1038/s41598-025-97652-6

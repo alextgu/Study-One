@@ -240,8 +240,8 @@ export async function submitFlashcardSessionComplete(
 }
 
 /**
- * Submits quiz completion for XP. Awards 25 XP base + 15 bonus for perfect score.
- * Idempotent per day (second quiz same day returns applied: false).
+ * @deprecated Quiz XP is applied in `submitQuiz` (POST /api/v1/quiz/attempt).
+ * This endpoint only returns current user stats without awarding XP.
  */
 export async function submitQuizResult(
   correct: number,

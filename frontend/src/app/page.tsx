@@ -10,7 +10,6 @@ import {
   submitFlashcardReview,
   submitFlashcardSessionComplete,
   submitQuiz,
-  submitQuizResult,
 } from "@/lib/api";
 import {
   type AnkiRating,
@@ -24,11 +23,9 @@ import {
 } from "@/types/api";
 import { useAuth } from "@/context/auth-context";
 import { supabase } from "@/lib/supabase";
+import { quizAttemptXpBreakdown } from "@/lib/quiz-xp";
 
 const USER_FRIENDLY_FALLBACK = "Something went wrong. Please try again.";
-
-const XP_PER_CORRECT = 25;
-const PERFECT_SCORE_BONUS = 15;
 
 /** Derive a short title from notes: first non-empty line, max 50 chars. */
 function studyPackTitleFromNotes(notes: string): string {
@@ -69,10 +66,10 @@ function buildPreviewSubmitResult(
   const total_correct = results.filter((r) => r.is_correct).length;
   const total_questions = results.length;
   const score = total_questions > 0 ? total_correct / total_questions : 0;
-  let xp_awarded = total_correct * XP_PER_CORRECT;
-  if (total_correct === total_questions && total_questions > 0) {
-    xp_awarded += PERFECT_SCORE_BONUS;
-  }
+  const { xp: xp_awarded, lines: xp_breakdown } = quizAttemptXpBreakdown(
+    total_correct,
+    total_questions,
+  );
   return {
     attempt_id: "preview",
     quiz_set_id: "preview",
@@ -80,6 +77,7 @@ function buildPreviewSubmitResult(
     total_correct,
     total_questions,
     xp_awarded,
+    xp_breakdown,
     results,
   };
 }
@@ -207,7 +205,6 @@ export default function Home() {
           selected_answer: filled[i] as string,
         })),
       });
-      await submitQuizResult(result.total_correct, result.total_questions, quizSetId);
       setSubmitResult(result);
     } catch (err) {
       console.error("Failed to submit quiz:", err);
@@ -595,8 +592,27 @@ export default function Home() {
                           )}
                         </p>
                         <p className="mt-2 text-base text-muted-foreground">
-                          XP earned: <span className="font-semibold text-foreground">{submitResult.xp_awarded}</span>
+                          XP earned:{" "}
+                          <span className="font-semibold text-foreground">
+                            {submitResult.xp_awarded}
+                          </span>
                         </p>
+                        {(submitResult.xp_breakdown?.length ?? 0) > 0 ? (
+                          <ul className="mt-3 space-y-1.5 text-sm text-muted-foreground">
+                            {submitResult.xp_breakdown!.map((line, i) => (
+                              <li key={i}>
+                                <span className="font-semibold tabular-nums text-foreground">
+                                  +{line.xp} XP
+                                </span>
+                                <span className="text-muted-foreground"> — {line.reason}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : submitResult.xp_awarded === 0 ? (
+                          <p className="mt-2 text-sm text-muted-foreground">
+                            No XP this round — correct answers earn XP.
+                          </p>
+                        ) : null}
                       </div>
                     )}
                     <div className="space-y-6">
@@ -745,20 +761,34 @@ function FlashcardGridPreview({
         ))}
       </div>
       {previewGamification && !previewGamificationError && (
-        <p className="text-sm text-muted-foreground">
+        <div className="text-sm text-muted-foreground">
           {previewGamification.applied ? (
             <>
-              Session XP:{" "}
-              <span className="font-semibold text-foreground">
-                {previewGamification.xp_awarded}
-              </span>
+              <p>
+                Session XP:{" "}
+                <span className="font-semibold text-foreground">
+                  {previewGamification.xp_awarded}
+                </span>
+              </p>
+              {(previewGamification.xp_breakdown?.length ?? 0) > 0 ? (
+                <ul className="mt-2 space-y-1">
+                  {previewGamification.xp_breakdown!.map((line, i) => (
+                    <li key={i}>
+                      <span className="font-semibold tabular-nums text-foreground">
+                        +{line.xp} XP
+                      </span>
+                      <span> — {line.reason}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
             </>
           ) : (
             <span>
               Daily flashcard session XP was already counted today. Keep studying!
             </span>
           )}
-        </p>
+        </div>
       )}
       {previewGamificationError && (
         <p className="text-xs text-destructive">{previewGamificationError}</p>

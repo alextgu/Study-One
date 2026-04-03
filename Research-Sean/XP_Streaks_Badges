@@ -24,7 +24,7 @@ Socrato's XP system rewards students with points for actively engaging with
 study material. Students earn 25 XP for every correct quiz answer with a 15 XP
 perfect-score bonus, and 10 XP for completing a flashcard session. Socrato also
 tracks daily streaks, awards badges at milestones, and calculates a level from
-total XP. Certain XP sources are limited to once per day to prevent spamming
+total XP. Flashcard session XP is limited to once per day to prevent spamming
 activities for the purpose of gaining points rather than putting in an active
 effort to learn.
 
@@ -32,7 +32,7 @@ Socrato's XP formula (25 XP x correct answers + 15 XP perfect bonus) rewards
 accuracy, not just participation. Students cannot earn XP without actually
 recalling answers. Following Coelho et al.'s findings, Socrato combines points
 with streaks, badges, and levels rather than relying on any single element
-alone. In addition, the daily XP cap and streaks reward continued engagement over time
+alone. In addition, streaks and the daily XP cap (for flashcards) reward continued engagement over time
 instead of cramming in one session, addressing Hernandez-Prados et al.'s warning
 about shallow engagement.
 

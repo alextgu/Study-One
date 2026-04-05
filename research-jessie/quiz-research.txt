@@ -1,0 +1,20 @@
+Due to the rise in AI, students are becoming increasingly reliant on these tools when studying as they provide fast ways to answer questions or summarize notes without requiring active engagement with the material. However, this causes the students to rely on passive learning or cognitive offloading since they are bypassing the mental effort to learn the topic (Lodge & Loble, 2026). 
+
+This introduces another major issue. As students are not actively engaging with the material, they become prone to the illusion of competence, where students mistake the ease to read the clear and well-structured AI-generated explanation as actually understanding the topic. In reality, this perceived mastery often fails when asked to apply the knowledge gained independently (Lodge & Loble, 2026). As a result, current patterns of AI use creates a shallow learning experience in which the AI performs most of the cognitive work, leading to a decline in students’ critical thinking skills.
+
+According to Karpicke & Grimaldi (2012), testing one’s knowledge is not only a way to measure learning but also a powerful method to promote it. Their research shows that actively recalling information strengthens memory and improves long-term retention more than simply rereading notes. Even unsuccessful retrieval attempts contribute to learning as the mental effort involved helps strengthen the neural pathways associated with the information. 
+
+Our application addresses this issue through a quiz generation feature which transforms the user notes into interactive assessments. Using the Gemini API, the system generates 5-10 multiple choice questions based on the user’s notes. Each quiz includes questions, answer options, correct answers, and linked topics. Once the user answers all the questions, the system automatically grades responses, tracks per-question correctness, provides why the answer is wrong if answered incorrectly, calculates the overall scores, and awards XP points for correct answers. Additionally, user performance is stored over time to track progress and identify learning trends. 
+
+This feature addresses the learning problem described above by forcing active recall. Although the questions are AI-generated, the one doing the act of “thinking” is the user as they need to retrieve the information related to the quiz questions from their memory to answer them. This reduces the amount of passive learning and cognitive offloading. Furthermore, the automatic grading and per-question correctness are used as feedback which allows the users to identify gaps in their understanding, supporting more effective self-regulation and improvement. 
+
+In addition, our implementation incorporates gamification elements, such as awarding XP points. By rewarding correct answers and tracking the user’s progress, the system encourages users to revisit material, correct mistakes, and continuously test their understanding. 
+
+Therefore, by combining retrieval-based learning technique, feedback, and gamifying the process of learning, the feature helps students engage more deeply with their learning and reduces the risk of shallow understanding caused by over-reliance on AI. 
+
+
+Resources: 
+
+Lodge J. M. and Loble L (2026). Artificial intelligence, cognitive offloading and implications for education, University of Technology Sydney, doi:10.71741/4pyxmbnjaq.31302475.
+
+Karpicke, J.D., Grimaldi, P.J. Retrieval-Based Learning: A Perspective for Enhancing Meaningful Learning. Educ Psychol Rev 24, 401–418 (2012). https://doi.org/10.1007/s10648-012-9202-2

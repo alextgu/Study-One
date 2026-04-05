@@ -111,7 +111,13 @@ export interface QuizExplanationResponse {
   explanation: string;
 }
 
-/** Response from POST /api/v1/quiz/result (XP and streak). */
+/** One line explaining part of an XP award (quiz, flashcards, etc.). */
+export interface XpAwardLine {
+  reason: string;
+  xp: number;
+}
+
+/** Response from POST /api/v1/quiz/result (deprecated; XP is on quiz/attempt). */
 export interface QuizResultResponse {
   applied: boolean;
   xp_awarded: number;
@@ -120,6 +126,8 @@ export interface QuizResultResponse {
     current_streak_days?: number;
     longest_streak_days?: number;
   };
+  xp_breakdown?: XpAwardLine[];
+  notice?: string | null;
 }
 
 /** Response from POST /api/v1/flashcards/session-complete (XP and streak). */
@@ -131,6 +139,7 @@ export interface FlashcardSessionCompleteResponse {
     current_streak_days?: number;
     longest_streak_days?: number;
   };
+  xp_breakdown?: XpAwardLine[];
 }
 
 // ============================================
@@ -167,7 +176,7 @@ export interface QuestionResult {
   correction_explanation?: string;
 }
 
-/** Response from POST /api/v1/quiz/submit. */
+/** Response from POST /api/v1/quiz/attempt. */
 export interface QuizSubmitResponse {
   attempt_id: string;
   quiz_set_id: string;
@@ -175,5 +184,6 @@ export interface QuizSubmitResponse {
   total_correct: number;
   total_questions: number;
   xp_awarded: number;
+  xp_breakdown?: XpAwardLine[];
   results: QuestionResult[];
 }

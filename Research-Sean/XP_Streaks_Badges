@@ -1,0 +1,66 @@
+When students use AI tools to study, they passively consume answers instead of
+understanding and engaging with the content. Bastani et al. (2024) found that
+students with ChatGPT access improved performance by 48%. However, once the AI
+was removed, grades were reduced by 17% which was worse than the performance by
+students who never had access to ChatGPT. The core issue is the loss of active
+effort. Students stop thinking through problems and learn passively, resulting
+in the material never actually being internalized.
+
+Lam & Tong (2024) found that points were the most effective gamification
+component for engagement, since points provide immediate and visible feedback on
+students' efforts that encourages continued participation. In a randomized
+controlled trial, Coelho et al. (2025) found that points alone increased task
+completion and enjoyment but did not improve final learning performance. However,
+a combination of points, badges, and challenges produced significantly higher
+learning outcomes than any single element or the control group, suggesting that
+points work best alongside other gamification elements. Hernandez-Prados et al.
+(2024) found that points increase intrinsic motivation by making learning more
+attractive, while challenges increase engagement by setting goals and showing
+students' progress. However, an improper balance of educational and gamification
+elements, such as systems rewarding speed rather than accuracy and comprehension,
+can divert attention from learning the material with a solid understanding.
+
+Socrato's XP system rewards students with points for actively engaging with
+study material. Students earn 25 XP for every correct quiz answer with a 15 XP
+perfect-score bonus, and 10 XP for completing a flashcard session. Socrato also
+tracks daily streaks, awards badges at milestones, and calculates a level from
+total XP. Flashcard session XP is limited to once per day to prevent spamming
+activities for the purpose of gaining points rather than putting in an active
+effort to learn.
+
+Socrato's XP formula (25 XP x correct answers + 15 XP perfect bonus) rewards
+accuracy, not just participation. Students cannot earn XP without actually
+recalling answers. Following Coelho et al.'s findings, Socrato combines points
+with streaks, badges, and levels rather than relying on any single element
+alone. In addition, streaks and the daily XP cap (for flashcards) reward continued engagement over time
+instead of cramming in one session, addressing Hernandez-Prados et al.'s warning
+about shallow engagement.
+
+AI tools make it easy for students to skip the cognitive work that produces real
+learning. The XP system and badges counter this by making that work feel
+rewarding. When a student sees XP increase or a new badge, Socrato reinforces
+active engagement rather than the passive learning resulting from the use of AI
+tools. Research shows that points are one of the strongest gamification elements
+for engagement, and combining them with streaks, badges, and levels keeps
+students motivated over time. The XP system is a core element that turns
+studying from a passive task by asking AI, into an active process students want
+to carry out themselves.
+
+
+References
+----------
+1. Bastani, H., et al. (2024). Generative AI Can Harm Learning.
+   https://hamsabastani.github.io/education_llm.pdf
+
+2. Lam, S. & Tong, T. (2024). Investigating the impact of gamification
+   components on online learners' engagement. Smart Learning Environments.
+   https://slejournal.springeropen.com/articles/10.1186/s40561-024-00336-3
+
+3. Coelho, A., et al. (2025). The impact of educational gamification on
+   cognition, emotions, and motivation. Journal of Computers in Education.
+   https://link.springer.com/article/10.1007/s40692-025-00366-x
+
+4. Hernandez-Prados, M. A., et al. (2024). Impact of Gamification on
+   Motivation and Academic Performance: A Systematic Review. Education
+   Sciences, 14(6), 639. MDPI.
+   https://www.mdpi.com/2227-7102/14/6/639

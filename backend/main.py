@@ -9,7 +9,14 @@ from fastapi import Depends, FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, field_validator
 from services import GeminiService, get_supabase
-from services.gamification import award_flashcard_session_xp, award_quiz_completion_xp
+from services.gamification import (
+    XP_FLASHCARD_SESSION,
+    XP_QUIZ_PERFECT_BONUS as PERFECT_SCORE_BONUS,
+    XP_QUIZ_PER_CORRECT as XP_CORRECT,
+    award_flashcard_session_xp,
+    quiz_attempt_xp_breakdown,
+    record_quiz_attempt_xp,
+)
 from services.badge_trigger import evaluate_and_award as evaluate_badge_triggers
 from middleware.auth import require_user, UserPayload, user_for_generate
 from typing import List, Optional
@@ -130,11 +137,19 @@ class QuizResultRequest(BaseModel):
     quiz_id: Optional[str] = None
 
 
+class XpAwardLine(BaseModel):
+    """One line item explaining part of an XP award (UI + analytics)."""
+    reason: str
+    xp: int
+
+
 class QuizResultResponse(BaseModel):
-    """Response from quiz completion - XP and streak via gamification engine."""
+    """Deprecated: XP is recorded on POST /api/v1/quiz/attempt. Kept for API compatibility."""
     applied: bool
     xp_awarded: int
     user_stats: dict
+    xp_breakdown: List[XpAwardLine] = []
+    notice: Optional[str] = None
 
 
 class FlashcardSessionCompleteRequest(BaseModel):
@@ -147,6 +162,7 @@ class FlashcardSessionCompleteResponse(BaseModel):
     applied: bool
     xp_awarded: int
     user_stats: dict
+    xp_breakdown: List[XpAwardLine] = []
 
 class QuizExplanationRequest(BaseModel):
     """
@@ -414,12 +430,13 @@ class QuizSubmitResponse(BaseModel):
     total_correct: int
     total_questions: int
     xp_awarded: int
+    xp_breakdown: List[XpAwardLine] = []
     results: list[QuestionResult]
 
-# XP awarded per correct answer 
-XP_CORRECT = 25
-# if user gets all the quiz questions right, get a bonus 
-PERFECT_SCORE_BONUS = 15
+
+def calc_xp(correct: int, total: int) -> int:
+    xp, _lines = quiz_attempt_xp_breakdown(correct=correct, total=total)
+    return xp
 
 
 # ============================================
@@ -502,13 +519,6 @@ def grade_quiz(answers: list[QuestionAnswer], questions: list[QuizQuestion]) -> 
         quiz_results.append(result)
     
     return quiz_results
-
-def calc_xp(correct: int, total: int) -> int:
-    """ Assign XP based on whether user got answer correct or wrong? """
-    xp = correct * XP_CORRECT
-    if correct == total: 
-        xp += PERFECT_SCORE_BONUS
-    return xp
 
 def validate_submit_quiz_request(request: QuizSubmitRequest) -> None:
     try: 
@@ -645,7 +655,7 @@ async def submit_quiz_attempt(
     correct = sum(1 for qr in question_result if qr.is_correct)
     total = len(questions)
     score = round((correct / total) * 100, 2)
-    xp = calc_xp(correct, total)
+    xp, breakdown_lines = quiz_attempt_xp_breakdown(correct=correct, total=total)
 
     # store the user's attempt of the quiz into supabase
     try:
@@ -665,30 +675,29 @@ async def submit_quiz_attempt(
             status_code=500,
             detail="Failed to store quiz attempt. Please try again."
         )
-    
-    # award XP 
-    try:
-        sb.table("user_activity").insert({
-            "user_id": user_id,
-            "activity_type": "quiz_attempt",
-            "xp_awarded": xp,
-            "metadata": {
-                "quiz_set_id": request.quiz_id,
-                "attempt_id": attempt_id,
-                "total_correct": correct,
-                "total_questions": total, 
-                "score": score
-            },
-        }).execute()
-    except Exception as e:
-        logger.warning("Failed to insert user_activity: %s", e)
 
-    if xp > 0:
-        try:
-            sb.rpc("increment_xp", {"p_user_id": user_id, "p_xp": xp}).execute()
-        except Exception as e:
-            logger.warning("Failed to increment XP: %s", e)
-            # Non-fatal, don't fail the whole request over XP
+    activity_md = {
+        "quiz_set_id": request.quiz_id,
+        "attempt_id": attempt_id,
+        "total_correct": correct,
+        "total_questions": total,
+        "score": score,
+        "xp_breakdown": breakdown_lines,
+    }
+    try:
+        rec = record_quiz_attempt_xp(
+            user_id=user_id,
+            xp_awarded=xp,
+            metadata=activity_md,
+        )
+        us = rec.get("user_stats")
+        if xp > 0 and isinstance(us, dict):
+            try:
+                evaluate_badge_triggers(user_id, user_stats=us)
+            except Exception as e:
+                logger.warning("Badge trigger evaluation failed after quiz attempt: %s", e)
+    except Exception as e:
+        logger.warning("apply_quiz_attempt_record failed: %s", e)
 
     submit_response = QuizSubmitResponse(
         attempt_id=attempt_id,
@@ -697,6 +706,7 @@ async def submit_quiz_attempt(
         total_correct=correct, 
         total_questions=total,
         xp_awarded=xp,
+        xp_breakdown=[XpAwardLine(**line) for line in breakdown_lines],
         results=question_result
     )
 
@@ -774,27 +784,34 @@ async def submit_quiz_result(
     request: QuizResultRequest,
     user: UserPayload = Depends(require_user),
 ):
-    """Submit quiz completion for XP. Awards 25 XP base + 15 bonus for perfect score. Idempotent per day."""
-    try:
-        result = award_quiz_completion_xp(
-            user_id=user["user_id"],
-            correct=request.correct,
-            total=request.total,
-            quiz_id=request.quiz_id,
+    """
+    Deprecated: XP and streaks are updated when you POST /api/v1/quiz/attempt.
+    This endpoint returns current stats without awarding duplicate XP.
+    """
+    if request.total <= 0 or request.correct < 0 or request.correct > request.total:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid correct/total: total must be > 0 and correct must be in [0, total].",
         )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except RuntimeError as e:
-        logger.warning("Quiz result apply_activity failed: %s", e)
-        raise HTTPException(status_code=500, detail="Failed to record quiz result.")
+    sb = get_supabase()
     try:
-        evaluate_badge_triggers(user["user_id"], user_stats=result["user_stats"])
+        row = (
+            sb.table("user_stats")
+            .select("user_id, xp_total, level, current_streak_days, longest_streak_days, last_active_at")
+            .eq("user_id", user["user_id"])
+            .maybe_single()
+            .execute()
+        )
+        stats = row.data if row.data else {}
     except Exception as e:
-        logger.warning("Badge trigger evaluation failed after quiz result: %s", e)
+        logger.warning("Quiz result stats fetch failed: %s", e)
+        stats = {}
     return QuizResultResponse(
-        applied=result["applied"],
-        xp_awarded=result["xp_awarded"],
-        user_stats=result["user_stats"],
+        applied=False,
+        xp_awarded=0,
+        user_stats=stats,
+        xp_breakdown=[],
+        notice="Quiz XP is recorded when you submit answers to POST /api/v1/quiz/attempt.",
     )
 
 
@@ -936,10 +953,16 @@ async def complete_flashcard_session(
         evaluate_badge_triggers(user["user_id"], user_stats=result["user_stats"])
     except Exception as e:
         logger.warning("Badge trigger evaluation failed after flashcard session: %s", e)
+    fc_breakdown: List[XpAwardLine] = []
+    if result["applied"] and result["xp_awarded"] > 0:
+        fc_breakdown = [
+            XpAwardLine(reason="Flashcard session completed", xp=XP_FLASHCARD_SESSION),
+        ]
     return FlashcardSessionCompleteResponse(
         applied=result["applied"],
         xp_awarded=result["xp_awarded"],
         user_stats=result["user_stats"],
+        xp_breakdown=fc_breakdown,
     )
 
 

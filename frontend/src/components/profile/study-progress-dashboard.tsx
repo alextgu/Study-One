@@ -6,8 +6,57 @@ import {
   fetchStudyDashboardAnalytics,
   formatStudyDuration,
   type StudyDashboardAnalytics,
+  type XpActivityEvent,
 } from "@/lib/study-analytics";
 import { supabase } from "@/lib/supabase";
+
+function activitySummaryLabel(activityType: string): string {
+  if (activityType === "quiz_attempt") return "Quiz attempt";
+  if (activityType === "flashcard_session") return "Flashcard session";
+  return activityType.replace(/_/g, " ") || "Activity";
+}
+
+function RecentXpBlock({ events }: { events: XpActivityEvent[] }) {
+  if (!events.length) return null;
+  return (
+    <div className="rounded-lg border border-border bg-background/50 p-4 sm:p-5">
+      <h3 className="mb-3 text-sm font-semibold">Recent points</h3>
+      <p className="mb-3 text-[11px] text-muted-foreground sm:text-xs">
+        Logged from your latest study actions. Breakdowns mirror what you saw when you earned XP.
+      </p>
+      <ul className="max-h-64 space-y-3 overflow-y-auto text-sm">
+        {events.map((ev, i) => (
+          <li
+            key={`${ev.occurredAt}-${i}`}
+            className="border-b border-border/60 pb-3 last:border-0 last:pb-0"
+          >
+            <time className="block text-[11px] text-muted-foreground" dateTime={ev.occurredAt}>
+              {new Date(ev.occurredAt).toLocaleString(undefined, {
+                dateStyle: "medium",
+                timeStyle: "short",
+              })}
+            </time>
+            {ev.lines.length > 0 ? (
+              <ul className="mt-1.5 space-y-1">
+                {ev.lines.map((line, j) => (
+                  <li key={j} className="text-muted-foreground">
+                    <span className="font-semibold tabular-nums text-foreground">+{line.xp} XP</span>
+                    <span> — {line.reason}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-1.5 text-muted-foreground">
+                <span className="font-semibold tabular-nums text-foreground">+{ev.xpAwarded} XP</span>
+                <span> — {activitySummaryLabel(ev.activityType)}</span>
+              </p>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
 
 function StatBlock({
   label,
@@ -218,6 +267,8 @@ export function StudyProgressDashboard({ userId }: { userId: string }) {
           </p>
         </div>
       </div>
+
+      <RecentXpBlock events={d.recentXp} />
 
       <p className="border-t border-border pt-4 text-xs text-muted-foreground">
         Longest streak: <span className="font-medium text-foreground">{d.longestStreak}</span> days

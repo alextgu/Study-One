@@ -115,13 +115,32 @@ def mock_supabase():
             return activity_chain
         return MagicMock()
 
+    def _rpc(name, params):
+        chain = MagicMock()
+        xp = params.get("p_xp_awarded", 0) if isinstance(params, dict) else 0
+        chain.execute.return_value = MagicMock(
+            data={
+                "xp_awarded": xp,
+                "user_stats": {
+                    "user_id": params.get("p_user_id"),
+                    "xp_total": xp,
+                    "current_streak_days": 1,
+                    "longest_streak_days": 1,
+                },
+            }
+        )
+        return chain
+
+    mock_sb.rpc.side_effect = _rpc
     mock_sb.table.side_effect = _route
     mock_sb._quiz_chain     = quiz_chain
     mock_sb._attempt_chain  = attempt_chain
     mock_sb._activity_chain = activity_chain
 
     with patch("main.get_supabase", return_value=mock_sb):
-        yield mock_sb
+        with patch("services.gamification.get_supabase", return_value=mock_sb):
+            with patch("main.evaluate_badge_triggers", MagicMock()):
+                yield mock_sb
 
 # ---------------------------------------------------------------------------
 # Mock data
@@ -416,18 +435,22 @@ class TesQuizAttempt:
             json={"quiz_id": QUIZ_SET_ID, "answers": ALL_CORRECT_ANSWERS},
             headers=auth_headers
         )
-        
-        mock_supabase._activity_chain.insert.assert_called_once()
-        payload = mock_supabase._activity_chain.insert.call_args[0][0]
-       
-        assert payload["user_id"] == "test-user-id"
-        assert payload["activity_type"] == "quiz_submit"
-        assert payload["xp_awarded"] == response.json()["xp_awarded"]
-        assert payload["metadata"]["quiz_set_id"] == QUIZ_SET_ID
-        assert payload["metadata"]["attempt_id"] == ATTEMPT_ID
-        assert payload["metadata"]["total_correct"] == len(ALL_CORRECT_ANSWERS)
-        assert payload["metadata"]["total_questions"] == len(QUIZ_QUESTIONS_DB)
-        assert payload["metadata"]["score"] == 100.0
+        assert response.status_code == 200
+        mock_supabase.rpc.assert_called()
+        call_names = [c[0][0] for c in mock_supabase.rpc.call_args_list]
+        assert "apply_quiz_attempt_record" in call_names
+        rpc_call = next(c for c in mock_supabase.rpc.call_args_list if c[0][0] == "apply_quiz_attempt_record")
+        payload = rpc_call[0][1]
+        assert payload["p_user_id"] == "test-user-id"
+        assert payload["p_xp_awarded"] == response.json()["xp_awarded"]
+        md = payload["p_metadata"]
+        assert md["quiz_set_id"] == QUIZ_SET_ID
+        assert md["attempt_id"] == ATTEMPT_ID
+        assert md["total_correct"] == len(ALL_CORRECT_ANSWERS)
+        assert md["total_questions"] == len(QUIZ_QUESTIONS_DB)
+        assert md["score"] == 100.0
+        assert isinstance(md.get("xp_breakdown"), list)
+        assert response.json()["xp_breakdown"]
     
     @pytest.mark.usefixtures("mock_supabase")
     def test_attempt_insert_fail(self, client, auth_headers, mock_supabase):
@@ -440,8 +463,7 @@ class TesQuizAttempt:
         )
         assert response.status_code == 500
         assert "Failed to store quiz attempt" in response.json()["detail"]
-        # When attempt insertion fails, there should be no user_activity or XP RPC calls
-        mock_supabase._activity_chain.insert.assert_not_called()
+        # When attempt insertion fails, there should be no XP RPC calls
         mock_supabase.rpc.assert_not_called()
 
     @pytest.mark.usefixtures("mock_supabase")
@@ -454,10 +476,10 @@ class TesQuizAttempt:
         )
         assert response.status_code == 200
 
-        mock_supabase._activity_chain.insert.assert_called_once()
-        payload = mock_supabase._activity_chain.insert.call_args[0][0]
-        assert payload["xp_awarded"] == 0
-        assert payload["metadata"]["score"] == 0.0
+        mock_supabase.rpc.assert_called_once()
+        payload = mock_supabase.rpc.call_args[0][1]
+        assert payload["p_xp_awarded"] == 0
+        assert payload["p_metadata"]["score"] == 0.0
 
 class TestAwardXP:
     """Test suite to check XP awarded properly"""
@@ -498,19 +520,22 @@ class TestAwardXP:
             json={"quiz_id": QUIZ_SET_ID, "answers": ALL_CORRECT_ANSWERS},
             headers=auth_headers,
         )
-        mock_supabase.rpc.assert_called_once()
-        assert mock_supabase.rpc.call_args[0][1]["p_xp"] == response.json()["xp_awarded"]
+        rpc_calls = [c for c in mock_supabase.rpc.call_args_list if c[0][0] == "apply_quiz_attempt_record"]
+        assert len(rpc_calls) == 1
+        assert rpc_calls[0][0][1]["p_xp_awarded"] == response.json()["xp_awarded"]
 
-    def test_rpc_not_called_when_xp_zero(self, client, auth_headers, mock_supabase):
+    def test_rpc_called_when_xp_zero(self, client, auth_headers, mock_supabase):
         client.post(
             "/api/v1/quiz/attempt",
             json={"quiz_id": QUIZ_SET_ID, "answers": ALL_WRONG_ANSWERS},
             headers=auth_headers,
         )
-        mock_supabase.rpc.assert_not_called()
+        mock_supabase.rpc.assert_called_once()
+        assert mock_supabase.rpc.call_args[0][0] == "apply_quiz_attempt_record"
+        assert mock_supabase.rpc.call_args[0][1]["p_xp_awarded"] == 0
 
     def test_xp_rpc_failure_is_non_fatal(self, client, auth_headers, mock_supabase):
-        mock_supabase.rpc.return_value.execute.side_effect = Exception("rpc down")
+        mock_supabase.rpc.side_effect = Exception("rpc down")
         response = client.post(
             "/api/v1/quiz/attempt",
             json={"quiz_id": QUIZ_SET_ID, "answers": ALL_CORRECT_ANSWERS},
@@ -520,9 +545,9 @@ class TestAwardXP:
         assert "attempt_id" in response.json()
 
     def test_activity_failure_is_non_fatal(self, client, auth_headers, mock_supabase):
-        mock_supabase._activity_chain.insert.return_value.execute.side_effect = Exception("activity down")
+        mock_supabase.rpc.side_effect = Exception("activity down")
         response = client.post(
-            "/api/v1/quiz/attempt",
+            "/api/v1/quiz/attempt", 
             json={"quiz_id": QUIZ_SET_ID, "answers": ALL_CORRECT_ANSWERS},
             headers=auth_headers,
         )
@@ -542,7 +567,7 @@ class TestInputValidation:
         assert response.status_code == 422
         assert "Please answer all questions before submitting" in response.json()["detail"]
         mock_supabase._attempt_chain.insert.assert_not_called()
-        mock_supabase._activity_chain.insert.assert_not_called()
+        mock_supabase.rpc.assert_not_called()
 
     @pytest.mark.usefixtures("mock_supabase")
     def test_more_answers(self, client, auth_headers, mock_supabase):
@@ -555,7 +580,7 @@ class TestInputValidation:
         assert response.status_code == 422
         assert "Please answer all questions before submitting" in response.json()["detail"]
         mock_supabase._attempt_chain.insert.assert_not_called()
-        mock_supabase._activity_chain.insert.assert_not_called()
+        mock_supabase.rpc.assert_not_called()
 
     @pytest.mark.usefixtures("mock_supabase")
     def test_duplicate_answers(self, client, auth_headers, mock_supabase):
@@ -568,7 +593,7 @@ class TestInputValidation:
         assert response.status_code == 422
         assert "no duplicates" in response.json()["detail"]
         mock_supabase._attempt_chain.insert.assert_not_called()
-        mock_supabase._activity_chain.insert.assert_not_called()
+        mock_supabase.rpc.assert_not_called()
 
     @pytest.mark.usefixtures("mock_supabase")
     def test_answer_not_in_option(self, client, auth_headers, mock_supabase):
@@ -581,7 +606,7 @@ class TestInputValidation:
         assert response.status_code == 422
         assert "not a valid option" in response.json()["detail"]
         mock_supabase._attempt_chain.insert.assert_not_called()
-        mock_supabase._activity_chain.insert.assert_not_called()
+        mock_supabase.rpc.assert_not_called()
 
     @pytest.mark.usefixtures("mock_supabase")
     def test_missing_quiz_id_field(self, client, auth_headers):
@@ -672,7 +697,7 @@ class TestQuizLookupFailures:
         assert response.status_code == 404
         assert str(QUIZ_SET_ID) in response.json()["detail"]
         mock_supabase._attempt_chain.insert.assert_not_called()
-        mock_supabase._activity_chain.insert.assert_not_called()
+        mock_supabase.rpc.assert_not_called()
 
     @pytest.mark.usefixtures("mock_supabase")
     def test_quiz_db_failure(self, client, auth_headers, mock_supabase):
@@ -687,4 +712,4 @@ class TestQuizLookupFailures:
         assert response.status_code == 500
         assert "Failed to retrieve quiz" in response.json()["detail"]
         mock_supabase._attempt_chain.insert.assert_not_called()
-        mock_supabase._activity_chain.insert.assert_not_called()
+        mock_supabase.rpc.assert_not_called()

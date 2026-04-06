@@ -11,6 +11,10 @@ XP_FLASHCARD_SESSION = 10
 XP_QUIZ_COMPLETION = 25
 XP_PERFECT_QUIZ_BONUS = 15
 
+# Graded quiz submit (POST /api/v1/quiz/attempt) — per-correct + perfect bonus
+XP_QUIZ_PER_CORRECT = 25
+XP_QUIZ_PERFECT_BONUS = 15
+
 # Level-from-XP formula: L2 at 100 XP, then +120, +140, +160, +180, ... (L3=220, L4=360, L5=520)
 # MUST match public.xp_to_level() in 20250302000002_level_from_xp.sql
 
@@ -74,6 +78,63 @@ def compute_streak_update(
     return StreakUpdate(current_streak_days=new_current, longest_streak_days=new_longest)
 
 
+def quiz_attempt_xp_breakdown(*, correct: int, total: int) -> tuple[int, list[dict[str, Any]]]:
+    """
+    XP for a graded quiz: (XP per correct answer) + optional perfect-score bonus.
+    Returns (total_xp, lines for UI/analytics metadata).
+    """
+    if total <= 0:
+        return 0, []
+    if correct < 0 or correct > total:
+        raise ValueError("correct must be within [0, total]")
+
+    from_correct = correct * XP_QUIZ_PER_CORRECT
+    perfect = correct == total and total > 0
+    bonus = XP_QUIZ_PERFECT_BONUS if perfect else 0
+    total_xp = from_correct + bonus
+
+    lines: list[dict[str, Any]] = []
+    if from_correct > 0:
+        q = "question" if correct == 1 else "questions"
+        lines.append(
+            {
+                "reason": f"Correct answers ({correct} {q})",
+                "xp": from_correct,
+            }
+        )
+    if bonus > 0:
+        lines.append({"reason": "Perfect score bonus", "xp": bonus})
+
+    return total_xp, lines
+
+
+def record_quiz_attempt_xp(
+    *,
+    user_id: str,
+    xp_awarded: int,
+    occurred_at: datetime | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """
+    Persist quiz_attempt activity and update aggregates when xp_awarded > 0.
+    Returns { xp_awarded, user_stats } (user_stats may be null if user has no stats row and xp is 0).
+    """
+    if xp_awarded < 0:
+        raise ValueError("xp_awarded must be >= 0")
+
+    sb = get_supabase()
+    payload = {
+        "p_user_id": user_id,
+        "p_xp_awarded": xp_awarded,
+        "p_occurred_at": (occurred_at or datetime.now(timezone.utc)).isoformat(),
+        "p_metadata": metadata or {},
+    }
+    res = sb.rpc("apply_quiz_attempt_record", payload).execute()
+    if res.data is None:
+        raise RuntimeError(f"apply_quiz_attempt_record failed: {res}")
+    return res.data
+
+
 def apply_activity(
     *,
     user_id: str,
@@ -110,12 +171,19 @@ def award_flashcard_session_xp(
     occurred_at: datetime | None = None,
     session_id: str | None = None,
 ) -> dict[str, Any]:
+    md: dict[str, Any] = {
+        "xp_breakdown": [
+            {"reason": "Flashcard session completed", "xp": XP_FLASHCARD_SESSION},
+        ],
+    }
+    if session_id:
+        md["session_id"] = session_id
     return apply_activity(
         user_id=user_id,
         activity_type="flashcard_session",
         xp_awarded=XP_FLASHCARD_SESSION,
         occurred_at=occurred_at,
-        metadata={"session_id": session_id} if session_id else {},
+        metadata=md,
     )
 
 

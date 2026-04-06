@@ -56,22 +56,36 @@ class TestQuizResultEndpoint:
         response = client.post("/api/v1/quiz/result", json={"correct": 5, "total": 5})
         assert response.status_code == 401
 
-    def test_quiz_result_success(self, client, auth_headers, mock_gamification_rpc):
-        mock_gamification_rpc.rpc.return_value.execute.return_value.data = {
-            "applied": True,
-            "xp_awarded": 40,
-            "user_stats": {"xp_total": 40, "current_streak_days": 1, "longest_streak_days": 1},
-        }
-        response = client.post(
-            "/api/v1/quiz/result",
-            json={"correct": 5, "total": 5},
-            headers=auth_headers,
+    def test_quiz_result_success(self, client, auth_headers):
+        mock_sb = MagicMock()
+        stats_chain = MagicMock()
+        stats_chain.execute.return_value = MagicMock(
+            data={
+                "user_id": "test-user-id",
+                "xp_total": 100,
+                "level": 2,
+                "current_streak_days": 3,
+                "longest_streak_days": 5,
+                "last_active_at": None,
+            }
         )
+        stats_chain.maybe_single.return_value = stats_chain
+        stats_chain.eq.return_value = stats_chain
+        stats_chain.select.return_value = stats_chain
+        mock_sb.table.return_value = stats_chain
+        with patch("main.get_supabase", return_value=mock_sb):
+            response = client.post(
+                "/api/v1/quiz/result",
+                json={"correct": 5, "total": 5},
+                headers=auth_headers,
+            )
         assert response.status_code == 200
         data = response.json()
-        assert data["applied"] is True
-        assert data["xp_awarded"] == 40
-        assert "user_stats" in data
+        assert data["applied"] is False
+        assert data["xp_awarded"] == 0
+        assert data["xp_breakdown"] == []
+        assert data["notice"]
+        assert data["user_stats"]["xp_total"] == 100
 
     def test_quiz_result_invalid_correct_rejects(self, client, auth_headers):
         response = client.post(

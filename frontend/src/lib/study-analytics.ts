@@ -13,6 +13,14 @@ export function xpToLevel(xpTotal: number): number {
   return Math.max(1, level);
 }
 
+export type XpActivityEvent = {
+  activityType: string;
+  xpAwarded: number;
+  occurredAt: string;
+  /** Parsed from `metadata.xp_breakdown` when present. */
+  lines: { reason: string; xp: number }[];
+};
+
 export type StudyDashboardAnalytics = {
   totalXp: number;
   level: number;
@@ -27,10 +35,27 @@ export type StudyDashboardAnalytics = {
   xpIntoLevel: number;
   xpSpanToNext: number;
   nextLevel: number;
+  /** Recent XP events for transparency (from `user_activity`). */
+  recentXp: XpActivityEvent[];
 };
 
 const MIN_PER_QUIZ = 4;
 const MIN_PER_FLASHCARD_SESSION = 6;
+
+function parseXpBreakdownFromMetadata(metadata: unknown): { reason: string; xp: number }[] {
+  if (!metadata || typeof metadata !== "object") return [];
+  const raw = (metadata as Record<string, unknown>).xp_breakdown;
+  if (!Array.isArray(raw)) return [];
+  const out: { reason: string; xp: number }[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const o = item as Record<string, unknown>;
+    if (typeof o.reason === "string" && typeof o.xp === "number") {
+      out.push({ reason: o.reason, xp: o.xp });
+    }
+  }
+  return out;
+}
 
 function levelProgress(xpTotal: number): Pick<
   StudyDashboardAnalytics,
@@ -56,7 +81,7 @@ function levelProgress(xpTotal: number): Pick<
  * Quizzes = rows with activity_type `quiz_attempt`; flashcard sessions = `flashcard_session`.
  */
 export async function fetchStudyDashboardAnalytics(userId: string): Promise<StudyDashboardAnalytics> {
-  const [statsRes, quizCountRes, fcCountRes] = await Promise.all([
+  const [statsRes, quizCountRes, fcCountRes, recentRes] = await Promise.all([
     supabase
       .from("user_stats")
       .select("xp_total, level, current_streak_days, longest_streak_days")
@@ -72,6 +97,12 @@ export async function fetchStudyDashboardAnalytics(userId: string): Promise<Stud
       .select("id", { count: "exact", head: true })
       .eq("user_id", userId)
       .eq("activity_type", "flashcard_session"),
+    supabase
+      .from("user_activity")
+      .select("activity_type, xp_awarded, metadata, occurred_at")
+      .eq("user_id", userId)
+      .order("occurred_at", { ascending: false })
+      .limit(12),
   ]);
 
   if (statsRes.error) throw statsRes.error;
@@ -80,6 +111,9 @@ export async function fetchStudyDashboardAnalytics(userId: string): Promise<Stud
   }
   if (fcCountRes.error && process.env.NODE_ENV === "development") {
     console.warn("[study-analytics] flashcard count:", fcCountRes.error.message);
+  }
+  if (recentRes.error && process.env.NODE_ENV === "development") {
+    console.warn("[study-analytics] recent activity:", recentRes.error.message);
   }
 
   const row = statsRes.data as
@@ -102,6 +136,14 @@ export async function fetchStudyDashboardAnalytics(userId: string): Promise<Stud
   const estimatedStudyMinutes =
     quizzesCompleted * MIN_PER_QUIZ + flashcardSessionsCompleted * MIN_PER_FLASHCARD_SESSION;
 
+  const recentRows = recentRes.error ? [] : (recentRes.data ?? []);
+  const recentXp: XpActivityEvent[] = recentRows.map((row: Record<string, unknown>) => ({
+    activityType: String(row.activity_type ?? ""),
+    xpAwarded: Number(row.xp_awarded ?? 0),
+    occurredAt: String(row.occurred_at ?? ""),
+    lines: parseXpBreakdownFromMetadata(row.metadata),
+  }));
+
   const prog = levelProgress(totalXp);
   // Prefer DB level when present; keep progress math from XP for consistency
   return {
@@ -116,6 +158,7 @@ export async function fetchStudyDashboardAnalytics(userId: string): Promise<Stud
     xpIntoLevel: prog.xpIntoLevel,
     xpSpanToNext: prog.xpSpanToNext,
     nextLevel: prog.nextLevel,
+    recentXp,
   };
 }
 

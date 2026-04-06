@@ -382,20 +382,34 @@ export default function FlashcardReviewPage() {
                 reinforcing the material.
               </p>
               {sessionGamification && !sessionGamificationError && (
-                <p className="text-base text-muted-foreground">
+                <div className="text-base text-muted-foreground">
                   {sessionGamification.applied ? (
                     <>
-                      XP earned:{" "}
-                      <span className="font-semibold text-foreground">
-                        {sessionGamification.xp_awarded}
-                      </span>
+                      <p>
+                        XP earned:{" "}
+                        <span className="font-semibold text-foreground">
+                          {sessionGamification.xp_awarded}
+                        </span>
+                      </p>
+                      {(sessionGamification.xp_breakdown?.length ?? 0) > 0 ? (
+                        <ul className="mt-2 space-y-1 text-sm">
+                          {sessionGamification.xp_breakdown!.map((line, i) => (
+                            <li key={i}>
+                              <span className="font-semibold tabular-nums text-foreground">
+                                +{line.xp} XP
+                              </span>
+                              <span> — {line.reason}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : null}
                     </>
                   ) : (
                     <span>
                       Daily flashcard session XP was already counted today. Keep studying!
                     </span>
                   )}
-                </p>
+                </div>
               )}
               {sessionGamificationError && (
                 <p className="text-sm text-destructive">{sessionGamificationError}</p>

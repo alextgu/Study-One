@@ -64,9 +64,12 @@ Rules:
 - Do NOT include markdown, code blocks, or any extra text
 - Do NOT include ```json or ``` markers
 - Generate between 5 and 10 questions
+- There should be exactly 4 "options" per question
 - The "answer" value must exactly match one of the strings in "options"
+- Set "answer" by copying one option string verbatim (same spelling, punctuation, and casing)
+- Before returning JSON, self-check every question: answer in options must be true
 - Vary which option holds the correct answer — do not cluster correct answers on the first option
-- Each question must have non-empty "question", "options" (exactly 4), "answer", and "topic" fields
+- Each question must have non-empty "question", "options", "answer", and "topic" fields
 - Each question's correctionExplanation MUST be a single 1–3 sentence paragraph that:
   - Clearly states why the correct answer is correct
   - Briefly mentions why the other options are wrong

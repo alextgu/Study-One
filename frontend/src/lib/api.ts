@@ -290,14 +290,20 @@ export async function fetchFlashcardHistory(
  * (one session per day counts). Call when the user finishes a flashcard session.
  */
 export async function submitFlashcardSessionComplete(
-  flashcardSetId: string
+  flashcardSetId: string,
+  sessionDurationS?: number,
 ): Promise<FlashcardSessionCompleteResponse> {
+  const body: { flashcard_set_id: string; session_duration_s?: number } = {
+    flashcard_set_id: flashcardSetId,
+  };
+  if (sessionDurationS !== undefined) body.session_duration_s = sessionDurationS;
+
   const response = await fetch(
     `${API_BASE_URL}/api/v1/flashcards/session-complete`,
     {
       method: "POST",
       headers: await authHeaders(),
-      body: JSON.stringify({ flashcard_set_id: flashcardSetId }),
+      body: JSON.stringify(body),
     }
   );
 
@@ -376,4 +382,60 @@ export async function requestQuizExplanation(params: {
   }
 
   return response.json();
+}
+
+/**
+ * Logs that a user started a study session (flashcard set or quiz).
+ */
+export async function logSessionStart(
+  resourceId: string,
+  resourceType: "flashcard_set" | "quiz",
+): Promise<void> {
+  try {
+    await fetch(`${API_BASE_URL}/api/v1/study/session-start`, {
+      method: "POST",
+      headers: await authHeaders(),
+      body: JSON.stringify({ resource_id: resourceId, resource_type: resourceType }),
+    });
+  } catch {
+    // Fire-and-forget; never surface errors to the user
+  }
+}
+
+/**
+ * Logs that a user abandoned a study session mid-way.
+ * Uses fetch with keepalive:true so it completes even if the page is unloading.
+ */
+export function logSessionAbandon(
+  resourceId: string,
+  resourceType: "flashcard_set" | "quiz",
+  payload: {
+    sessionDurationS?: number;
+    cardsReviewed?: number;
+    questionsAnswered?: number;
+    totalQuestions?: number;
+  },
+  token: string | null,
+): void {
+  const body = JSON.stringify({
+    resource_id: resourceId,
+    resource_type: resourceType,
+    session_duration_s: payload.sessionDurationS,
+    cards_reviewed: payload.cardsReviewed,
+    questions_answered: payload.questionsAnswered,
+    total_questions: payload.totalQuestions,
+  });
+
+  // keepalive:true ensures the request completes even during beforeunload
+  fetch(`${API_BASE_URL}/api/v1/study/abandon`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body,
+    keepalive: true,
+  }).catch(() => {
+    // Fire-and-forget
+  });
 }

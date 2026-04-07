@@ -155,6 +155,7 @@ class QuizResultResponse(BaseModel):
 class FlashcardSessionCompleteRequest(BaseModel):
     """Request body for POST /api/v1/flashcards/session-complete."""
     flashcard_set_id: str
+    session_duration_s: Optional[int] = None
 
 
 class FlashcardSessionCompleteResponse(BaseModel):
@@ -163,6 +164,24 @@ class FlashcardSessionCompleteResponse(BaseModel):
     xp_awarded: int
     user_stats: dict
     xp_breakdown: List[XpAwardLine] = []
+
+class StudySessionStartRequest(BaseModel):
+    """Request body for POST /api/v1/study/session-start."""
+    resource_id: str
+    resource_type: str  # "flashcard_set" | "quiz"
+    session_id: Optional[str] = None
+
+
+class StudyAbandonRequest(BaseModel):
+    """Request body for POST /api/v1/study/abandon."""
+    resource_id: str
+    resource_type: str  # "flashcard_set" | "quiz"
+    session_id: Optional[str] = None
+    session_duration_s: Optional[int] = None
+    cards_reviewed: Optional[int] = None
+    questions_answered: Optional[int] = None
+    total_questions: Optional[int] = None
+
 
 class QuizExplanationRequest(BaseModel):
     """
@@ -236,6 +255,22 @@ def validate_data(data):
 
 
 # ============================================
+# EVENT LOGGING HELPER
+# ============================================
+
+def _log_study_event(sb, event_type: str, user_id: Optional[str], **kwargs) -> None:
+    """Fire-and-forget insert into study_events. Never raises."""
+    try:
+        row: dict = {"event_type": event_type, "user_id": user_id}
+        for k, v in kwargs.items():
+            if v is not None:
+                row[k] = v
+        sb.table("study_events").insert(row).execute()
+    except Exception as e:
+        logger.warning("Failed to log study event '%s': %s", event_type, e)
+
+
+# ============================================
 # ROUTES
 # ============================================
 
@@ -263,6 +298,7 @@ async def get_current_user(user: UserPayload = Depends(require_user)):
 async def generate_study_materials(
     request: GenerateRequest,
     _user: Optional[UserPayload] = Depends(user_for_generate),
+    x_session_id: Optional[str] = Header(None),
 ):
     """Generate study materials from user notes. Auth controlled by REQUIRE_AUTH_FOR_GENERATE."""
 
@@ -297,6 +333,13 @@ async def generate_study_materials(
             logger.info("Quiz quality warnings count: %d", len(quality_warnings))
 
 
+        uid = _user["user_id"] if _user else None
+        sb = get_supabase()
+        _log_study_event(sb, "slide_upload", uid, session_id=x_session_id,
+                         metadata={"text_length": len(request.text)})
+        _log_study_event(sb, "quiz_generated", uid, session_id=x_session_id,
+                         metadata={"question_count": len(quiz_questions)})
+
         return GenerateResponse(
             summary=data.get("summary", []),
             quiz=quiz_questions
@@ -326,6 +369,7 @@ async def generate_study_materials(
 async def generate_study_pack(
     request: StudyPackRequest,
     _user: Optional[UserPayload] = Depends(user_for_generate),
+    x_session_id: Optional[str] = Header(None),
 ):
     """Generate a study pack from user notes. Auth controlled by REQUIRE_AUTH_FOR_GENERATE."""
     prompt = build_study_generation_prompt(
@@ -354,12 +398,19 @@ async def generate_study_pack(
         quality_warnings = validate_quiz_quality(data.get("quiz", []))
         if quality_warnings:
             logger.info("Quiz quality warnings count: %d", len(quality_warnings))
-        
+
+        uid = _user["user_id"] if _user else None
+        sb = get_supabase()
+        _log_study_event(sb, "slide_upload", uid, session_id=x_session_id,
+                         metadata={"text_length": len(request.text)})
+        _log_study_event(sb, "quiz_generated", uid, session_id=x_session_id,
+                         metadata={"question_count": len(quiz_questions)})
+
         return GenerateResponse(
             summary=data['summary'],
             quiz=quiz_questions
         )
-    
+
     except json.JSONDecodeError as e:
         logger.warning("Failed to parse Gemini JSON: %s", e)
         logger.debug("Raw Gemini response: %s", response)
@@ -553,6 +604,7 @@ def validate_submit_quiz_request(request: QuizSubmitRequest) -> None:
 async def generate_quiz_questions(
     request: StudyPackRequest,
     user: UserPayload | None = Depends(user_for_generate),
+    x_session_id: Optional[str] = Header(None),
 ):
     """Generate MC Quiz from user notes. Store quiz in supabase."""
 
@@ -584,6 +636,12 @@ async def generate_quiz_questions(
             detail="Failed to store quiz. Please try again."
         )
 
+    uid = user["user_id"] if user else None
+    _log_study_event(sb, "quiz_generated", uid,
+                     session_id=x_session_id,
+                     resource_id=quiz_set_id,
+                     resource_type="quiz",
+                     metadata={"question_count": len(quiz_questions)})
 
     return GenerateQuizResponse(quiz_set_id=quiz_set_id, quiz=quiz_questions)
 
@@ -591,6 +649,7 @@ async def generate_quiz_questions(
 async def submit_quiz_attempt(
     request: QuizSubmitRequest,
     user: UserPayload = Depends(require_user),
+    x_session_id: Optional[str] = Header(None),
 ):
     """Submit a quiz attempt: grade answers, store the attempt and results, return score and XP."""
     
@@ -699,11 +758,20 @@ async def submit_quiz_attempt(
     except Exception as e:
         logger.warning("apply_quiz_attempt_record failed: %s", e)
 
+    _log_study_event(sb, "quiz_completed", user_id,
+                     session_id=x_session_id,
+                     resource_id=request.quiz_id,
+                     resource_type="quiz",
+                     quiz_score=score,
+                     quiz_correct=correct,
+                     quiz_total=total,
+                     points_awarded=xp)
+
     submit_response = QuizSubmitResponse(
         attempt_id=attempt_id,
         quiz_set_id=request.quiz_id,
         score=score,
-        total_correct=correct, 
+        total_correct=correct,
         total_questions=total,
         xp_awarded=xp,
         xp_breakdown=[XpAwardLine(**line) for line in breakdown_lines],
@@ -893,8 +961,10 @@ def parse_and_validate_flashcards(raw_response: str) -> List[Flashcard]:
 
 @app.post("/api/v1/flashcards", response_model=FlashcardResponse)
 async def generate_flashcards(
-    request: FlashcardRequest, 
-    user: Optional[UserPayload] = Depends(user_for_generate)):
+    request: FlashcardRequest,
+    user: Optional[UserPayload] = Depends(user_for_generate),
+    x_session_id: Optional[str] = Header(None),
+):
     """
     Generate 10 Q/A flashcards from notes or a topic, store in Supabase.
     """
@@ -932,6 +1002,13 @@ async def generate_flashcards(
             detail="Failed to store flashcards. Please try again."
         )
 
+    uid = user["user_id"] if user else None
+    _log_study_event(sb, "flashcards_generated", uid,
+                     session_id=x_session_id,
+                     resource_id=flashcard_set_id,
+                     resource_type="flashcard_set",
+                     metadata={"card_count": len(flashcards)})
+
     return FlashcardResponse(flashcard_set_id=flashcard_set_id, flashcards=flashcards)
 
 
@@ -939,6 +1016,7 @@ async def generate_flashcards(
 async def complete_flashcard_session(
     request: FlashcardSessionCompleteRequest,
     user: UserPayload = Depends(require_user),
+    x_session_id: Optional[str] = Header(None),
 ):
     """Record flashcard session completion for XP. Awards 10 XP. Idempotent per day."""
     try:
@@ -953,6 +1031,37 @@ async def complete_flashcard_session(
         evaluate_badge_triggers(user["user_id"], user_stats=result["user_stats"])
     except Exception as e:
         logger.warning("Badge trigger evaluation failed after flashcard session: %s", e)
+
+    # Compute rating stats from today's reviews for the research log
+    try:
+        sb = get_supabase()
+        today = datetime.now(timezone.utc).date().isoformat()
+        reviews = sb.table("flashcard_reviews") \
+            .select("rating") \
+            .eq("user_id", user["user_id"]) \
+            .eq("flashcard_set_id", request.flashcard_set_id) \
+            .gte("reviewed_at", today) \
+            .execute()
+        ratings = [r["rating"] for r in (reviews.data or [])]
+        rating_map = {"again": 1, "hard": 2, "good": 3, "easy": 4}
+        counts = {k: ratings.count(k) for k in ("again", "hard", "good", "easy")}
+        avg = round(sum(rating_map[r] for r in ratings) / len(ratings), 2) if ratings else None
+        _log_study_event(sb, "study_session_end", user["user_id"],
+                         session_id=x_session_id,
+                         resource_id=request.flashcard_set_id,
+                         resource_type="flashcard_set",
+                         session_duration_s=request.session_duration_s,
+                         cards_reviewed=len(ratings) or None,
+                         avg_rating=avg,
+                         again_count=counts["again"] or None,
+                         hard_count=counts["hard"] or None,
+                         good_count=counts["good"] or None,
+                         easy_count=counts["easy"] or None,
+                         points_awarded=result["xp_awarded"],
+                         streak_day=result["user_stats"].get("current_streak_days"))
+    except Exception as e:
+        logger.warning("Failed to log study_session_end event: %s", e)
+
     fc_breakdown: List[XpAwardLine] = []
     if result["applied"] and result["xp_awarded"] > 0:
         fc_breakdown = [
@@ -1061,6 +1170,92 @@ async def get_card_history(
     return {"history": latest_per_card}
 
 
+# ============================================
+# RESEARCH EXPORT
+# ============================================
+
+@app.get("/api/v1/admin/export")
+async def export_study_events(user: UserPayload = Depends(require_user)):
+    """
+    Download all study_events as CSV for research analysis.
+    Requires authentication; returns data for the authenticated user only.
+    """
+    import csv
+    import io
+    from fastapi.responses import StreamingResponse
+
+    sb = get_supabase()
+    try:
+        result = sb.table("study_events") \
+            .select("*") \
+            .eq("user_id", user["user_id"]) \
+            .order("timestamp", desc=False) \
+            .execute()
+    except Exception as e:
+        logger.warning("Export query failed: %s", e)
+        raise HTTPException(status_code=500, detail="Failed to fetch events.")
+
+    rows = result.data or []
+    if not rows:
+        raise HTTPException(status_code=404, detail="No events found.")
+
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=rows[0].keys())
+    writer.writeheader()
+    writer.writerows(rows)
+    output.seek(0)
+
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=study_events.csv"},
+    )
+
+
+# ============================================
+# STUDY SESSION LOGGING
+# ============================================
+
+@app.post("/api/v1/study/session-start")
+async def log_session_start(
+    request: StudySessionStartRequest,
+    user: UserPayload = Depends(require_user),
+    x_session_id: Optional[str] = Header(None),
+):
+    """Log that a user started a study session (flashcard set or quiz)."""
+    sb = get_supabase()
+    _log_study_event(
+        sb, "study_session_start", user["user_id"],
+        session_id=request.session_id or x_session_id,
+        resource_id=request.resource_id,
+        resource_type=request.resource_type,
+    )
+    return {"logged": True}
+
+
+@app.post("/api/v1/study/abandon")
+async def log_session_abandon(
+    request: StudyAbandonRequest,
+    user: UserPayload = Depends(require_user),
+    x_session_id: Optional[str] = Header(None),
+):
+    """Log that a user abandoned a quiz or flashcard session mid-way."""
+    event_type = (
+        "flashcard_abandoned" if request.resource_type == "flashcard_set"
+        else "quiz_abandoned"
+    )
+    sb = get_supabase()
+    _log_study_event(
+        sb, event_type, user["user_id"],
+        session_id=request.session_id or x_session_id,
+        resource_id=request.resource_id,
+        resource_type=request.resource_type,
+        session_duration_s=request.session_duration_s,
+        cards_reviewed=request.cards_reviewed,
+        quiz_total=request.total_questions,
+        quiz_correct=request.questions_answered,
+    )
+    return {"logged": True}
 # SLIDE UPLOAD SYSTEM
 class SlideStudyPackResponse(BaseModel):
     """Response from POST /api/v1/slides/study-pack."""

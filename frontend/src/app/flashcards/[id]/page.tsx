@@ -7,9 +7,12 @@ import { useAuth } from "@/context/auth-context";
 import { supabase } from "@/lib/supabase";
 import {
   fetchFlashcardHistory,
+  logSessionAbandon,
+  logSessionStart,
   submitFlashcardReview,
   submitFlashcardSessionComplete,
 } from "@/lib/api";
+import { getAccessToken } from "@/lib/auth";
 import type { AnkiRating, Flashcard, FlashcardSessionCompleteResponse } from "@/types/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -108,6 +111,9 @@ export default function FlashcardReviewPage() {
     null,
   );
   const sessionCompleteRequestedRef = useRef(false);
+  const sessionStartTimeRef = useRef<number>(Date.now());
+  const cardsReviewedCountRef = useRef(0);
+  const cachedTokenRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!user || !flashcardSetId) {
@@ -173,6 +179,8 @@ export default function FlashcardReviewPage() {
 
         if (!cancelled) {
           sessionCompleteRequestedRef.current = false;
+          sessionStartTimeRef.current = Date.now();
+          cardsReviewedCountRef.current = 0;
           setSessionGamification(null);
           setSessionGamificationError(null);
           setAllSets(all);
@@ -180,6 +188,8 @@ export default function FlashcardReviewPage() {
           setQueue(initialQueue);
           setCurrentIndex(initialQueue[0]?.index ?? null);
           setSessionFinished(initialQueue.length === 0);
+          // Log session start (fire-and-forget)
+          void logSessionStart(flashcardSetId, "flashcard_set");
         }
       } catch (err) {
         if (!cancelled) {
@@ -225,6 +235,7 @@ export default function FlashcardReviewPage() {
     setCurrentRating(rating);
     try {
       await submitFlashcardReview(setRow.id, ratedCardIndex, rating);
+      cardsReviewedCountRef.current += 1;
 
       const nextQueue = computeNextQueueAfterRate(queue, rating, repeatCounts);
 
@@ -241,7 +252,8 @@ export default function FlashcardReviewPage() {
         sessionCompleteRequestedRef.current = true;
         setSessionGamificationError(null);
         try {
-          const res = await submitFlashcardSessionComplete(setRow.id);
+          const durationS = Math.round((Date.now() - sessionStartTimeRef.current) / 1000);
+          const res = await submitFlashcardSessionComplete(setRow.id, durationS);
           setSessionGamification(res);
         } catch (err) {
           console.error("Failed to record flashcard session XP:", err);
@@ -271,6 +283,32 @@ export default function FlashcardReviewPage() {
   useEffect(() => {
     setFlipped(false);
   }, [currentIndex]);
+
+  // Keep a cached auth token so beforeunload can use it synchronously
+  useEffect(() => {
+    if (!user) return;
+    getAccessToken().then((t) => { cachedTokenRef.current = t; }).catch(() => {});
+  }, [user]);
+
+  // Log abandonment when user leaves mid-session
+  useEffect(() => {
+    if (!flashcardSetId) return;
+
+    function handleBeforeUnload() {
+      if (sessionFinished || cardsReviewedCountRef.current === 0) return;
+      const durationS = Math.round((Date.now() - sessionStartTimeRef.current) / 1000);
+      // getAccessToken is async; we cache the token via a closure updated below
+      logSessionAbandon(
+        flashcardSetId,
+        "flashcard_set",
+        { sessionDurationS: durationS, cardsReviewed: cardsReviewedCountRef.current },
+        cachedTokenRef.current,
+      );
+    }
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [flashcardSetId, sessionFinished]);
 
   if (!user) {
     return (
